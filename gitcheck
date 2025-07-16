@@ -1,0 +1,126 @@
+#!/bin/bash
+
+# GitCheck - Quality assessment tool for code repositories
+# Usage: gitcheck [config_file] [commit_hash] [options]
+
+set -euo pipefail
+
+# =============================================================================
+# GLOBAL VARIABLES
+# =============================================================================
+
+# Default values
+CONFIG_FILE="gitcheck.yaml"
+COMMIT_HASH=""
+PREFLIGHT_ONLY=false
+CHECKS_ONLY=false
+METRICS_ONLY=false
+
+# =============================================================================
+# UTILITY FUNCTIONS
+# =============================================================================
+
+# Function to display usage
+usage() {
+    cat << EOF
+Usage: gitcheck [config_file] [commit_hash] [options]
+
+Arguments:
+    config_file    Path to gitcheck.yaml file (default: gitcheck.yaml)
+    commit_hash    Git commit hash to evaluate (default: latest commit of current branch)
+
+Options:
+    --preflight-only    Run only the preflight phase
+    --checks-only       Run only the checks phase  
+    --metrics-only      Run only the metrics phase
+
+Examples:
+    gitcheck                                    # Use defaults
+    gitcheck my-config.yaml                    # Custom config, latest commit
+    gitcheck gitcheck.yaml abc1234             # Specific commit
+    gitcheck my-config.yaml HEAD --checks-only # Custom config, HEAD, checks only
+EOF
+    exit 1
+}
+
+# =============================================================================
+# ARGUMENT PROCESSING
+# =============================================================================
+
+# Process command line arguments
+process_arguments() {
+    while [[ $# -gt 0 ]]; do
+        case $1 in
+            --preflight-only)
+                PREFLIGHT_ONLY=true
+                shift
+                ;;
+            --checks-only)
+                CHECKS_ONLY=true
+                shift
+                ;;
+            --metrics-only)
+                METRICS_ONLY=true
+                shift
+                ;;
+            --help|-h)
+                usage
+                ;;
+            -*)
+                echo "Unknown option: $1"
+                usage
+                ;;
+            *)
+                # Positional arguments
+                if [[ -z "$CONFIG_FILE" || "$CONFIG_FILE" == "gitcheck.yaml" ]]; then
+                    CONFIG_FILE="$1"
+                elif [[ -z "$COMMIT_HASH" ]]; then
+                    COMMIT_HASH="$1"
+                else
+                    echo "Too many arguments"
+                    usage
+                fi
+                shift
+                ;;
+        esac
+    done
+}
+
+# Validate argument combinations
+validate_arguments() {
+    # Validate that only one phase option is specified
+    local phase_count=0
+    [[ "$PREFLIGHT_ONLY" == true ]] && ((phase_count++))
+    [[ "$CHECKS_ONLY" == true ]] && ((phase_count++))
+    [[ "$METRICS_ONLY" == true ]] && ((phase_count++))
+
+    if [[ $phase_count -gt 1 ]]; then
+        echo "Error: Only one phase option can be specified"
+        usage
+    fi
+
+    # If no commit hash specified, use latest commit of current branch
+    if [[ -z "$COMMIT_HASH" ]]; then
+        COMMIT_HASH=$(git rev-parse HEAD)
+    fi
+}
+
+# Display configuration
+display_configuration() {
+    echo "GitCheck Configuration:"
+    echo "  Config file: $CONFIG_FILE"
+    echo "  Commit hash: $COMMIT_HASH"
+    echo "  Preflight only: $PREFLIGHT_ONLY"
+    echo "  Checks only: $CHECKS_ONLY"
+    echo "  Metrics only: $METRICS_ONLY"
+    echo ""
+}
+
+# =============================================================================
+# MAIN EXECUTION
+# =============================================================================
+
+# Process and validate arguments
+process_arguments "$@"
+validate_arguments
+display_configuration 

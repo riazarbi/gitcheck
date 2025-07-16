@@ -1,0 +1,38 @@
+# Sample GitCheck configuration
+# This file defines the quality assessment pipeline for a shell script repository
+
+# Preflight commands run before quality checks to set up the environment
+# Add commands here to:
+# - Check if required tools are installed
+# - Set up virtual environments
+# - Install dependencies
+# - Configure the testing environment
+preflight:
+  - name: "check_shellcheck"
+    command: "which shellcheck || (echo 'ShellCheck not found. Install with: brew install shellcheck' && exit 1)"
+  
+  - name: "check_bats"
+    command: "which bats || (echo 'BATS not found. Install with: brew install bats-core' && exit 1)"
+  
+  - name: "check_kcov"
+    command: "which kcov || (echo 'kcov not found. Install with: brew install kcov' && exit 1)"
+
+# Quality assessment commands that generate artefact files
+# Add commands here to:
+# - Run linters and static analysis tools
+# - Execute tests and generate coverage reports
+# - Perform security scans
+# - Calculate code complexity metrics
+# - Generate any other quality metrics
+checks:
+  - name: "shell_lint"
+    command: "shellcheck gitcheck --shell=bash --severity=style"
+  
+  - name: "shell_tests"
+    command: "bats tests/"
+  
+  - name: "shell_coverage"
+    command: "kcov --bash-dont-parse-binary-dir --include-path=. --exclude-path=tests/ coverage/ bats tests/"
+  
+  - name: "shell_security"
+    command: "shellcheck gitcheck --severity=warning" 
