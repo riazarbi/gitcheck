@@ -61,12 +61,30 @@ checks:
 metrics:
   - name: "code_complexity"
     command: "echo '5'"
-    allowed_values: ["1", "2", "3", "4", "5", "6", "7", "8", "9", "10"]
+    data_type: "number"
+    allowed_values: ["1-10"]
+    default: "1"
   
   - name: "test_coverage"
     command: "echo '85'"
-    allowed_values: ["0", "10", "20", "30", "40", "50", "60", "70", "80", "90", "100"]
+    data_type: "number"
+    allowed_values: ["0-100"]
+    default: "0"
   
   - name: "lines_of_code"
     command: "wc -l gitcheck | awk '{print $1}'"
-    allowed_values: ["0-100", "101-500", "501-1000", "1001+"] 
+    data_type: "number"
+    allowed_values: ["0-100", "101-500", "501-1000", "1001+"]
+    default: "0"
+  
+  - name: "code_quality_score"
+    command: "echo '1.5'"
+    data_type: "number"
+    allowed_values: ["0-1"]
+    default: "0"
+  
+  - name: "build_status"
+    command: "echo 'success'"
+    data_type: "string"
+    allowed_values: ["success", "warning", "failure"]
+    default: "failure" 

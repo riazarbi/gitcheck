@@ -96,3 +96,87 @@ This project is currently in development. More details about setup and contribut
 ## License
 
 [License information to be added] 
+
+## Metrics Phase
+
+GitCheck supports a robust metrics phase for validating repository quality metrics. This phase is configured in your `gitcheck.yaml` and produces a `.gitcheck/metrics.json` summary.
+
+### YAML Structure
+
+Your `gitcheck.yaml` must include these top-level keys (even if empty):
+
+```yaml
+preflight: []
+checks: []
+metrics:
+  # ... metrics definitions ...
+```
+
+#### Metrics Section
+Each metric must have the following fields:
+- `name`: Unique name for the metric.
+- `command`: Shell command to run. The first line of its output is used as the metric value.
+- `data_type`: `"number"` or `"string"`.
+- `allowed_values`:
+  - For `"number"`: List of ranges (e.g., `"0-1"`, `"10-20"`) and/or exact values (e.g., `"5"`).
+  - For `"string"`: List of allowed string values.
+- `default`: Value to use if the metric fails (must be in `allowed_values`).
+
+**Example:**
+```yaml
+metrics:
+  - name: "code_quality_score"
+    command: "echo '0.85'"
+    data_type: "number"
+    allowed_values: ["0-1"]
+    default: "0"
+  - name: "build_status"
+    command: "echo 'success'"
+    data_type: "string"
+    allowed_values: ["success", "warning", "failure"]
+    default: "failure"
+```
+
+### Metrics Phase Behavior
+- Each metric command is run in a subshell.
+- The output is validated:
+  - **Number**: Must fall within at least one allowed range or match an allowed value.
+  - **String**: Must match one of the allowed values.
+- If validation fails or the command errors, the `default` value is used in the summary.
+- All results are written to `.gitcheck/metrics.json` with a `status` field:
+  - `"pass"`: Metric passed validation.
+  - `"default"`: Default value used due to failure.
+
+**Example `metrics.json`:**
+```json
+[
+  {
+    "name": "code_quality_score",
+    "value": "0.85",
+    "allowed_values": ["0-1"],
+    "status": "pass"
+  },
+  {
+    "name": "build_status",
+    "value": "failure",
+    "allowed_values": ["success", "warning", "failure"],
+    "status": "default"
+  }
+]
+```
+
+- The script exits with code 0 if all metrics pass, or 1 if any metric fails (uses default).
+
+### Validation
+- All required keys must be present in each metric.
+- The `default` value must be valid (in the allowed range/set).
+- If validation fails, the script prints an error and exits.
+
+### Testing
+- Comprehensive BATS tests cover all metrics scenarios: passing, failing, command errors, invalid defaults, decimals, and all-fail cases.
+
+### Usage
+
+```sh
+./gitcheck --only=metrics
+``` 

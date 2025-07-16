@@ -213,6 +213,11 @@ validate_yaml_config() {
             local name_exists=$(yq eval ".metrics[$i].name" "$yaml_file" 2>/dev/null)
             local command_exists=$(yq eval ".metrics[$i].command" "$yaml_file" 2>/dev/null)
             local allowed_values_exists=$(yq eval ".metrics[$i].allowed_values" "$yaml_file" 2>/dev/null)
+            local data_type_exists=$(yq eval ".metrics[$i].data_type" "$yaml_file" 2>/dev/null)
+            local default_exists=$(yq eval ".metrics[$i].default" "$yaml_file" 2>/dev/null)
+            local allowed_values_json=$(yq eval -o=json ".metrics[$i].allowed_values" "$yaml_file" 2>/dev/null)
+            local data_type=$(yq eval ".metrics[$i].data_type" "$yaml_file" 2>/dev/null)
+            local default_value=$(yq eval ".metrics[$i].default" "$yaml_file" 2>/dev/null)
             
             if [[ "$name_exists" == "null" ]] || [[ -z "$name_exists" ]]; then
                 echo "Error: Metrics command $((i+1)) missing 'name' field"
@@ -224,6 +229,44 @@ validate_yaml_config() {
             fi
             if [[ "$allowed_values_exists" == "null" ]] || [[ -z "$allowed_values_exists" ]]; then
                 echo "Error: Metrics command $((i+1)) missing 'allowed_values' field"
+                exit 1
+            fi
+            if [[ "$data_type_exists" == "null" ]] || [[ -z "$data_type_exists" ]]; then
+                echo "Error: Metrics command $((i+1)) missing 'data_type' field"
+                exit 1
+            fi
+            if [[ "$default_exists" == "null" ]] || [[ -z "$default_exists" ]]; then
+                echo "Error: Metrics command $((i+1)) missing 'default' field"
+                exit 1
+            fi
+            # Validate default is in allowed range/set
+            local default_valid=0
+            if [[ "$data_type" == "number" ]]; then
+                # Check if default is in any allowed range or matches an allowed value
+                for allowed_val in $(echo "$allowed_values_json" | jq -r '.[]'); do
+                    if [[ "$allowed_val" =~ ^([0-9]+(\.[0-9]+)?)-([0-9]+(\.[0-9]+)?)$ ]]; then
+                        local range_min="${BASH_REMATCH[1]}"
+                        local range_max="${BASH_REMATCH[3]}"
+                        if (( $(echo "$default_value >= $range_min && $default_value <= $range_max" | bc -l) )); then
+                            default_valid=1
+                            break
+                        fi
+                    elif [[ "$allowed_val" == "$default_value" ]]; then
+                        default_valid=1
+                        break
+                    fi
+                done
+            else
+                # For string, must be in allowed_values set
+                for allowed_val in $(echo "$allowed_values_json" | jq -r '.[]'); do
+                    if [[ "$allowed_val" == "$default_value" ]]; then
+                        default_valid=1
+                        break
+                    fi
+                done
+            fi
+            if [[ $default_valid -ne 1 ]]; then
+                echo "Error: Metrics command $((i+1)) has a default value ('$default_value') not in allowed_values."
                 exit 1
             fi
         done
@@ -323,6 +366,119 @@ execute_yaml_section() {
     fi
 }
 
+# Function to execute metrics phase
+execute_metrics_phase() {
+    set +e
+    local yaml_file="$1"
+    local phase_name="Metrics"
+    local metrics_dir="$ARTEFACT_DIR/metrics"
+    mkdir -p "$metrics_dir"
+    local results_json="[]"
+    local fail_count=0
+    local total_count=0
+
+    echo "Running $phase_name phase..."
+    echo "=================================="
+
+    while IFS= read -r obj; do
+        local name command allowed_values data_type default_value
+        name=$(jq -r '.name' <<< "$obj")
+        command=$(jq -r '.command' <<< "$obj")
+        allowed_values=$(jq -c '.allowed_values' <<< "$obj")
+        data_type=$(jq -r '.data_type' <<< "$obj")
+        default_value=$(jq -r '.default' <<< "$obj")
+        ((total_count++))
+        echo "Running metric: $name"
+        echo "Command: $command"
+        local artefact_file="$metrics_dir/$name"
+        echo "Saving output to: $artefact_file"
+        local tmp_output_file
+        tmp_output_file=$(mktemp)
+        (
+            set +e
+            {
+                echo "# GitCheck Metric Artefact: $name"
+                echo "# Generated: $(date)"
+                echo "# Command: $command"
+                echo "# Allowed values: $allowed_values"
+                echo "# Phase: $phase_name"
+                echo "# ========================================="
+                echo ""
+            } | tee "$artefact_file"
+            # Run the command, capture output (stdout only, trimmed)
+            metric_output=$(eval "$command" 2>&1)
+            metric_status=${PIPESTATUS[0]}
+            echo "$metric_output" | tee -a "$artefact_file"
+            # Only use first line of output for value comparison
+            echo "$metric_output" | head -n1 | xargs > "$tmp_output_file"
+            exit $metric_status
+        )
+        local exit_status=$?
+        local metric_value=""
+        local metric_status_str="fail"
+        if [[ -f "$tmp_output_file" ]]; then
+            metric_value=$(cat "$tmp_output_file")
+            rm -f "$tmp_output_file"
+        fi
+        # Compare output to allowed_values based on data_type
+        local pass=0
+        if [[ $exit_status -eq 0 ]]; then
+            if [[ "$data_type" == "number" ]]; then
+                # For numeric values, check ranges
+                while IFS= read -r allowed_val; do
+                    if [[ "$allowed_val" =~ ^([0-9]+(\.[0-9]+)?)-([0-9]+(\.[0-9]+)?)$ ]]; then
+                        local range_min="${BASH_REMATCH[1]}"
+                        local range_max="${BASH_REMATCH[3]}"
+                        # Check if metric_value is within this range (using bc for decimal comparison)
+                        if (( $(echo "$metric_value >= $range_min && $metric_value <= $range_max" | bc -l) )); then
+                            pass=1
+                            break
+                        fi
+                    elif [[ "$allowed_val" == "$metric_value" ]]; then
+                        # Exact match for non-range values
+                        pass=1
+                        break
+                    fi
+                done < <(jq -r '.[]' <<< "$allowed_values")
+            else
+                # For string values, use exact set matching
+                if jq -e --arg val "$metric_value" '. | index($val)' <<< "$allowed_values" >/dev/null; then
+                    pass=1
+                fi
+            fi
+            
+            if [[ $pass -eq 1 ]]; then
+                echo "✅ $name: PASS (value: $metric_value)"
+                metric_status_str="pass"
+            else
+                echo "❌ $name: FAIL (value: $metric_value, allowed: $allowed_values)"
+                metric_value="$default_value"
+                metric_status_str="default"
+                ((fail_count++))
+            fi
+        else
+            echo "❌ $name: ERROR (command failed, exit code: $exit_status)"
+            metric_value="$default_value"
+            metric_status_str="default"
+            ((fail_count++))
+        fi
+        # Save result to results_json
+        results_json=$(jq -c --arg name "$name" --arg value "$metric_value" --argjson allowed "$allowed_values" --arg status "$metric_status_str" '. += [{name: $name, value: $value, allowed_values: $allowed, status: $status}]' <<< "$results_json")
+        echo ""
+    done < <(parse_yaml_section "$yaml_file" "metrics" | jq -c '.[]')
+
+    # Always write metrics.json, even if some metrics fail
+    echo "$results_json" | jq '.' > "$ARTEFACT_DIR/metrics.json"
+    echo "Metrics phase completed: $((total_count - fail_count))/$total_count metrics passed"
+    echo "Results saved to $ARTEFACT_DIR/metrics.json"
+    set -e
+    if [[ $fail_count -gt 0 ]]; then
+        return 1
+    else
+        return 0
+    fi
+}
+
 # MAIN EXECUTION
 process_arguments "$@"
 validate_arguments
@@ -348,12 +504,14 @@ elif [[ "$ONLY_PHASE" == "checks" ]]; then
     echo "GitCheck completed!"
     exit 0
 elif [[ "$ONLY_PHASE" == "metrics" ]]; then
-    echo "Metrics phase not yet implemented"
-    exit 1
+    execute_metrics_phase "$CONFIG_FILE"
+    echo "GitCheck completed!"
+    exit $?
 else
     # No --only flag: run all phases in order
     execute_yaml_section "$CONFIG_FILE" "preflight" "Preflight"
     execute_yaml_section "$CONFIG_FILE" "checks" "Checks"
-    echo "Metrics phase not yet implemented"
+    execute_metrics_phase "$CONFIG_FILE"
     echo "GitCheck completed!"
+    exit $?
 fi 
