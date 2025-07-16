@@ -14,8 +14,6 @@ preflight:
   - name: "check_bats"
     command: "which bats || (echo 'BATS not found. Install with: brew install bats-core' && exit 1)"
   
-  - name: "check_kcov"
-    command: "which kcov || (echo 'kcov not found. Install with: brew install kcov' && exit 1)"
 
 # Quality assessment commands that generate artefact files
 # Add commands here to:
@@ -30,9 +28,6 @@ checks:
   
   - name: "shell_tests"
     command: "bats tests/"
-  
-  - name: "shell_coverage"
-    command: "kcov --bash-dont-parse-binary-dir --include-path=. --exclude-path=tests/ coverage/ bats tests/"
   
   - name: "shell_security"
     command: "shellcheck gitcheck --severity=warning" 

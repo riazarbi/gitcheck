@@ -53,7 +53,32 @@ checks:
     command: "npm run test:coverage"
 ```
 
-**Note:** The script will execute these commands against the code at the specified commit hash, while reading the `gitcheck.yaml` file from the current working directory. Artefact files are automatically named after their step name (without extension) and stored in the `.gitcheck/` folder.
+**Note:**
+- Use `--config <file>` (or `-c <file>`) to specify the config file (default: `gitcheck.yaml`).
+- Use `--commit <hash>` (or `-C <hash>`) to specify the commit hash (default: latest commit of current branch).
+- The script will execute these commands against the code at the specified commit hash, while reading the `gitcheck.yaml` file from the current working directory. Artefact files are automatically named after their step name (without extension) and stored in the `.gitcheck/` folder.
+
+### Example Commands
+
+```bash
+# Run with all defaults
+gitcheck
+
+# Specify config file
+gitcheck --config my-config.yaml
+
+# Specify commit hash
+gitcheck --commit abc1234
+
+# Specify both config and commit
+gitcheck --config my-config.yaml --commit abc1234
+
+# Run only checks phase
+gitcheck --checks-only
+
+# Combine options
+gitcheck --config my-config.yaml --commit HEAD --checks-only
+```
 
 ## Output Structure
 
@@ -63,34 +88,6 @@ GitCheck produces two types of outputs:
 2. **Metrics File** - Computed quality scores in `metrics.json` that is automatically added as a git note named `gitcheck-metrics` to the evaluated commit
 
 The metrics are computed by analyzing the contents of the artefact files and calculating various quality scores.
-
-### Running GitCheck
-
-```bash
-# Run complete quality evaluation with all defaults (gitcheck.yaml, latest commit)
-gitcheck
-
-# Run quality evaluation with custom config file
-gitcheck my-config.yaml
-
-# Run quality evaluation against a specific commit
-gitcheck gitcheck.yaml abc1234
-
-# Run quality evaluation against HEAD
-gitcheck gitcheck.yaml HEAD
-
-# Run individual phases
-gitcheck --preflight-only
-gitcheck --checks-only
-gitcheck --metrics-only
-
-# Combine phase selection with other arguments
-gitcheck my-config.yaml abc1234 --checks-only
-
-# Outputs:
-# - Artefact files in .gitcheck/ folder (command output logs)
-# - metrics.json added as git note 'gitcheck-metrics' to the commit
-```
 
 ## Development
 

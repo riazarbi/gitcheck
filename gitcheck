@@ -1,5 +1,17 @@
 #!/bin/bash
 
+# Check for required system dependencies
+if ! command -v yq >/dev/null 2>&1; then
+    echo "Error: yq is required but not installed." >&2
+    echo "Install from: https://github.com/mikefarah/yq#install" >&2
+    exit 1
+fi
+if ! command -v git >/dev/null 2>&1; then
+    echo "Error: git is required but not installed." >&2
+    echo "Install from: https://git-scm.com/downloads" >&2
+    exit 1
+fi
+
 # GitCheck - Quality assessment tool for code repositories
 # Usage: gitcheck [config_file] [commit_hash] [options]
 
@@ -12,9 +24,7 @@ set -euo pipefail
 # Default values
 CONFIG_FILE="gitcheck.yaml"
 COMMIT_HASH=""
-PREFLIGHT_ONLY=false
-CHECKS_ONLY=false
-METRICS_ONLY=false
+ONLY_PHASE=""
 
 # =============================================================================
 # UTILITY FUNCTIONS
@@ -30,15 +40,15 @@ Arguments:
     commit_hash    Git commit hash to evaluate (default: latest commit of current branch)
 
 Options:
-    --preflight-only    Run only the preflight phase
-    --checks-only       Run only the checks phase  
-    --metrics-only      Run only the metrics phase
+    --config|-c    Path to gitcheck.yaml file (default: gitcheck.yaml)
+    --commit|-C    Git commit hash to evaluate (default: latest commit of current branch)
+    --only=PHASE   Run only the specified phase (validate, preflight, checks, metrics)
 
 Examples:
     gitcheck                                    # Use defaults
     gitcheck my-config.yaml                    # Custom config, latest commit
     gitcheck gitcheck.yaml abc1234             # Specific commit
-    gitcheck my-config.yaml HEAD --checks-only # Custom config, HEAD, checks only
+    gitcheck my-config.yaml HEAD --only=checks # Custom config, HEAD, checks only
 EOF
     exit 1
 }
@@ -49,18 +59,24 @@ EOF
 
 # Process command line arguments
 process_arguments() {
+    local only_count=0
     while [[ $# -gt 0 ]]; do
         case $1 in
-            --preflight-only)
-                PREFLIGHT_ONLY=true
-                shift
+            --config|-c)
+                CONFIG_FILE="$2"
+                shift 2
                 ;;
-            --checks-only)
-                CHECKS_ONLY=true
-                shift
+            --commit|-C)
+                COMMIT_HASH="$2"
+                shift 2
                 ;;
-            --metrics-only)
-                METRICS_ONLY=true
+            --only=*)
+                ((only_count++))
+                if [[ $only_count -gt 1 ]]; then
+                    echo "Error: Only one --only flag can be specified"
+                    usage
+                fi
+                ONLY_PHASE="${1#--only=}"
                 shift
                 ;;
             --help|-h)
@@ -71,16 +87,8 @@ process_arguments() {
                 usage
                 ;;
             *)
-                # Positional arguments
-                if [[ -z "$CONFIG_FILE" || "$CONFIG_FILE" == "gitcheck.yaml" ]]; then
-                    CONFIG_FILE="$1"
-                elif [[ -z "$COMMIT_HASH" ]]; then
-                    COMMIT_HASH="$1"
-                else
-                    echo "Too many arguments"
-                    usage
-                fi
-                shift
+                echo "Unknown positional argument: $1"
+                usage
                 ;;
         esac
     done
@@ -88,20 +96,32 @@ process_arguments() {
 
 # Validate argument combinations
 validate_arguments() {
-    # Validate that only one phase option is specified
-    local phase_count=0
-    [[ "$PREFLIGHT_ONLY" == true ]] && ((phase_count++))
-    [[ "$CHECKS_ONLY" == true ]] && ((phase_count++))
-    [[ "$METRICS_ONLY" == true ]] && ((phase_count++))
-
-    if [[ $phase_count -gt 1 ]]; then
-        echo "Error: Only one phase option can be specified"
-        usage
+    # Validate ONLY_PHASE
+    if [[ -n "$ONLY_PHASE" ]]; then
+        case "$ONLY_PHASE" in
+            validate|preflight|checks|metrics)
+                ;;
+            *)
+                echo "Error: Unknown phase for --only: $ONLY_PHASE"
+                usage
+                ;;
+        esac
     fi
 
     # If no commit hash specified, use latest commit of current branch
     if [[ -z "$COMMIT_HASH" ]]; then
         COMMIT_HASH=$(git rev-parse HEAD)
+    fi
+
+    # Resolve HEAD to actual commit hash if needed
+    if [[ "$COMMIT_HASH" == "HEAD" ]]; then
+        COMMIT_HASH=$(git rev-parse HEAD)
+    fi
+
+    # Validate that the commit hash exists
+    if ! git cat-file -e "$COMMIT_HASH^{commit}" 2>/dev/null; then
+        echo "Error: Commit hash '$COMMIT_HASH' does not exist or is not a commit."
+        exit 1
     fi
 }
 
@@ -110,17 +130,129 @@ display_configuration() {
     echo "GitCheck Configuration:"
     echo "  Config file: $CONFIG_FILE"
     echo "  Commit hash: $COMMIT_HASH"
-    echo "  Preflight only: $PREFLIGHT_ONLY"
-    echo "  Checks only: $CHECKS_ONLY"
-    echo "  Metrics only: $METRICS_ONLY"
+    echo "  Only phase: $ONLY_PHASE"
     echo ""
 }
 
 # =============================================================================
-# MAIN EXECUTION
+# YAML PARSING AND EXECUTION
 # =============================================================================
 
-# Process and validate arguments
+# Function to parse YAML file and extract commands from a section
+parse_yaml_section() {
+    local yaml_file="$1"
+    local section="$2"
+    
+    if [[ ! -f "$yaml_file" ]]; then
+        echo "Error: Config file '$yaml_file' not found"
+        exit 1
+    fi
+    
+    local in_section=false
+    local commands=()
+    
+    while IFS= read -r line; do
+        # Skip comments and empty lines
+        [[ "$line" =~ ^[[:space:]]*# ]] && continue
+        [[ -z "${line// }" ]] && continue
+        
+        # Check if we're entering the target section
+        if [[ "$line" =~ ^[[:space:]]*${section}: ]]; then
+            in_section=true
+            continue
+        fi
+        
+        # Check if we're leaving the section (next top-level key)
+        if [[ "$in_section" == true ]] && [[ "$line" =~ ^[[:space:]]*[a-zA-Z_][a-zA-Z0-9_]*: ]] && [[ ! "$line" =~ ^[[:space:]]*${section}: ]]; then
+            break
+        fi
+        
+        # Extract command if we're in the right section
+        if [[ "$in_section" == true ]] && [[ "$line" =~ ^[[:space:]]*-[[:space:]]*name:[[:space:]]*\"([^\"]+)\" ]]; then
+            local name="${BASH_REMATCH[1]}"
+            # Read next line for command
+            if IFS= read -r next_line; then
+                if [[ "$next_line" =~ ^[[:space:]]*command:[[:space:]]*\"([^\"]+)\" ]]; then
+                    local command="${BASH_REMATCH[1]}"
+                    commands+=("$name:$command")
+                fi
+            fi
+        fi
+    done < "$yaml_file"
+    
+    printf '%s\n' "${commands[@]}"
+}
+
+# Function to execute commands from a section
+execute_yaml_section() {
+    local yaml_file="$1"
+    local section="$2"
+    local phase_name="$3"
+    
+    echo "Running $phase_name phase..."
+    echo "=================================="
+    
+    local commands=()
+    while IFS= read -r line; do
+        commands+=("$line")
+    done < <(parse_yaml_section "$yaml_file" "$section")
+    
+    if [[ ${#commands[@]} -eq 0 ]]; then
+        echo "No commands found in $section section"
+        return 0
+    fi
+    
+    local success_count=0
+    local total_count=${#commands[@]}
+    
+    for cmd_pair in "${commands[@]}"; do
+        IFS=':' read -r name command <<< "$cmd_pair"
+        echo "Running: $name"
+        echo "Command: $command"
+        
+        if eval "$command"; then
+            echo "✅ $name: SUCCESS"
+            ((success_count++))
+        else
+            echo "❌ $name: FAILED"
+        fi
+        echo ""
+    done
+    
+    echo "$phase_name phase completed: $success_count/$total_count commands succeeded"
+    echo ""
+    
+    return $((total_count - success_count))
+}
+
+# MAIN EXECUTION
 process_arguments "$@"
 validate_arguments
 display_configuration 
+
+# Ensure artefact folder exists
+ARTEFACT_DIR=".gitcheck"
+mkdir -p "$ARTEFACT_DIR"
+
+# If --only is set, run only that phase
+if [[ "$ONLY_PHASE" == "validate" ]]; then
+    echo "Configuration validated successfully."
+    exit 0
+elif [[ "$ONLY_PHASE" == "preflight" ]]; then
+    execute_yaml_section "$CONFIG_FILE" "preflight" "Preflight"
+    echo "GitCheck completed!"
+    exit 0
+elif [[ "$ONLY_PHASE" == "checks" ]]; then
+    execute_yaml_section "$CONFIG_FILE" "checks" "Checks"
+    echo "GitCheck completed!"
+    exit 0
+elif [[ "$ONLY_PHASE" == "metrics" ]]; then
+    echo "Metrics phase not yet implemented"
+    exit 1
+else
+    # No --only flag: run all phases in order
+    execute_yaml_section "$CONFIG_FILE" "preflight" "Preflight"
+    execute_yaml_section "$CONFIG_FILE" "checks" "Checks"
+    echo "Metrics phase not yet implemented"
+    echo "GitCheck completed!"
+fi 
