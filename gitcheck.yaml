@@ -8,13 +8,13 @@
 # - Install dependencies
 # - Configure the testing environment
 preflight:
-  - name: "check_shellcheck"
+  - name: "shellcheck"
     command: "which shellcheck || (echo 'ShellCheck not found. Install with: brew install shellcheck' && exit 1)"
   
-  - name: "check_bats"
+  - name: "bats"
     command: "which bats || (echo 'BATS not found. Install with `brew install bats-core`' && exit 1)"
   
-  - name: "check_claude"
+  - name: "claude"
     command: "which claude || (echo 'claude not found. Install from https://claude.ai/download' && exit 1)"
 
 # Quality assessment commands that generate artefact files
@@ -25,20 +25,23 @@ preflight:
 # - Calculate code complexity metrics
 # - Generate any other quality metrics
 checks:
-  - name: "shell_lint"
+  - name: "lint"
     command: "shellcheck gitcheck --shell=bash --severity=style"
   
-  - name: "shell_tests"
+  - name: "tests"
     command: "bats tests/"
   
-  - name: "shell_security"
+  - name: "security"
     command: "shellcheck gitcheck --severity=warning"
   
   - name: "coverage"
-    command: |
-      claude --dangerously-skip-permissions -p 'Generate a coverage report for the gitcheck script. 
-      You can run tests with `bats tests/`.
-      The code is in the @gitcheck script.
+    command: >
+      claude --dangerously-skip-permissions -p 'Generate a coverage report for the gitcheck script.  
+      The test results are at @.gitcheck/tests
+      The tests are in the @tests/ directory.
+      The code being tested is in the @gitcheck script.
+      Do not alter any files.
+      Do not create any files.
       Do this noninteractively, without any chatter, until you output your final report.
       The report should include the following sections:
       - Total lines of code
@@ -46,7 +49,7 @@ checks:
       - Total lines of code covered by tests
       - Total lines of code not covered by tests
       - Percentage of code covered by tests
-      - Percentage of code not covered by tests'"
+      - Percentage of code not covered by tests'
 
 # Metrics commands that generate structured data for analysis
 # Add commands here to:

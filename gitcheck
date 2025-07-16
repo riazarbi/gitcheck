@@ -11,6 +11,11 @@ if ! command -v git >/dev/null 2>&1; then
     echo "Install from: https://git-scm.com/downloads" >&2
     exit 1
 fi
+if ! command -v jq >/dev/null 2>&1; then
+    echo "Error: jq is required but not installed." >&2
+    echo "Install from: https://stedolan.github.io/jq/download/" >&2
+    exit 1
+fi
 
 # GitCheck - Quality assessment tool for code repositories
 # Usage: gitcheck [config_file] [commit_hash] [options]
@@ -236,87 +241,86 @@ validate_yaml_config() {
 parse_yaml_section() {
     local yaml_file="$1"
     local section="$2"
-    
     if [[ ! -f "$yaml_file" ]]; then
         echo "Error: Config file '$yaml_file' not found"
         exit 1
     fi
-    
-    local in_section=false
-    local commands=()
-    
-    while IFS= read -r line; do
-        # Skip comments and empty lines
-        [[ "$line" =~ ^[[:space:]]*# ]] && continue
-        [[ -z "${line// }" ]] && continue
-        
-        # Check if we're entering the target section
-        if [[ "$line" =~ ^[[:space:]]*${section}: ]]; then
-            in_section=true
-            continue
-        fi
-        
-        # Check if we're leaving the section (next top-level key)
-        if [[ "$in_section" == true ]] && [[ "$line" =~ ^[[:space:]]*[a-zA-Z_][a-zA-Z0-9_]*: ]] && [[ ! "$line" =~ ^[[:space:]]*${section}: ]]; then
-            break
-        fi
-        
-        # Extract command if we're in the right section
-        if [[ "$in_section" == true ]] && [[ "$line" =~ ^[[:space:]]*-[[:space:]]*name:[[:space:]]*\"([^\"]+)\" ]]; then
-            local name="${BASH_REMATCH[1]}"
-            # Read next line for command
-            if IFS= read -r next_line; then
-                if [[ "$next_line" =~ ^[[:space:]]*command:[[:space:]]*\"([^\"]+)\" ]]; then
-                    local command="${BASH_REMATCH[1]}"
-                    commands+=("$name:$command")
-                fi
-            fi
-        fi
-    done < "$yaml_file"
-    
-    printf '%s\n' "${commands[@]}"
+    yq -o=json eval ".$section" "$yaml_file"
 }
 
 # Function to execute commands from a section
 execute_yaml_section() {
+    # Temporarily disable set -e to allow command failures without exiting
+    set +e
+    
     local yaml_file="$1"
     local section="$2"
     local phase_name="$3"
-    
+
     echo "Running $phase_name phase..."
     echo "=================================="
-    
-    local commands=()
-    while IFS= read -r line; do
-        commands+=("$line")
-    done < <(parse_yaml_section "$yaml_file" "$section")
-    
-    if [[ ${#commands[@]} -eq 0 ]]; then
-        echo "No commands found in $section section"
-        return 0
-    fi
-    
+
     local success_count=0
-    local total_count=${#commands[@]}
-    
-    for cmd_pair in "${commands[@]}"; do
-        IFS=':' read -r name command <<< "$cmd_pair"
+    local total_count=0
+
+    # Remove debug output
+    # (No debug echo statements)
+
+    while IFS= read -r obj; do
+        local name command
+        name=$(jq -r '.name' <<< "$obj")
+        command=$(jq -r '.command' <<< "$obj")
+        ((total_count++))
         echo "Running: $name"
         echo "Command: $command"
-        
-        if eval "$command"; then
-            echo "✅ $name: SUCCESS"
+        local artefact_file="$ARTEFACT_DIR/$name"
+        echo "Saving output to: $artefact_file"
+        (
+            set +e
+            {
+                echo "# GitCheck Artefact: $name"
+                echo "# Generated: $(date)"
+                echo "# Command: $command"
+                echo "# Phase: $phase_name"
+                echo "# ========================================="
+                echo ""
+            } | tee "$artefact_file"
+            # Now run the command, teeing both stdout and stderr to the artefact file and terminal
+            eval "$command" 2>&1 | tee -a "$artefact_file"
+            exit_status=${PIPESTATUS[0]}
+            exit $exit_status
+        )
+        local exit_status=$?
+        # For checks phase, treat any exit code as success (command executed)
+        # The non-zero exit codes indicate issues found, not execution failure
+        if [[ "$section" == "checks" ]]; then
+            echo "✅ $name: EXECUTED (exit code: $exit_status)"
             ((success_count++))
         else
-            echo "❌ $name: FAILED"
+            # For other phases (preflight), treat non-zero as failure
+            if [[ $exit_status -eq 0 ]]; then
+                echo "✅ $name: SUCCESS"
+                ((success_count++))
+            else
+                echo "❌ $name: FAILED (exit code: $exit_status)"
+            fi
         fi
         echo ""
-    done
-    
-    echo "$phase_name phase completed: $success_count/$total_count commands succeeded"
+    done < <(parse_yaml_section "$yaml_file" "$section" | jq -c '.[]')
     echo ""
     
-    return $((total_count - success_count))
+    # Re-enable set -e
+    set -e
+    
+    # Only exit with failure if any commands failed to execute
+    # (not if they ran successfully but found issues)
+    if [[ $success_count -lt $total_count ]]; then
+        echo "$phase_name phase completed: $success_count/$total_count commands succeeded"
+        return 1
+    else
+        echo "$phase_name phase completed: $success_count/$total_count commands succeeded"
+        return 0
+    fi
 }
 
 # MAIN EXECUTION
