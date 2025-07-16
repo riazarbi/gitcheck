@@ -20,12 +20,30 @@ setup() {
     git commit -m "Initial commit"
 }
 
+# Helper function to create a minimal valid YAML file
+create_valid_yaml() {
+    local filename="${1:-gitcheck.yaml}"
+    cat > "$filename" << 'EOF'
+preflight:
+  - name: "test_preflight"
+    command: "echo 'preflight test'"
+checks:
+  - name: "test_check"
+    command: "echo 'check test'"
+metrics:
+  - name: "test_metric"
+    command: "echo 'metric test'"
+    allowed_values: ["test"]
+EOF
+}
+
 teardown() {
     # Clean up temporary directory
     rm -rf "$TEST_DIR"
 }
 
 @test "should work in a valid git repository" {
+    create_valid_yaml
     run ./gitcheck --only=validate
     [ "$status" -eq 0 ]
     [[ "$output" == *"GitCheck Configuration:"* ]]
@@ -41,14 +59,14 @@ teardown() {
 
 @test "should validate commit hash exists" {
     COMMIT_HASH=$(git rev-parse HEAD)
-    touch gitcheck.yaml
+    create_valid_yaml
     run ./gitcheck --config gitcheck.yaml --commit "$COMMIT_HASH" --only=validate
     [ "$status" -eq 0 ]
     [[ "$output" == *"Commit hash: $COMMIT_HASH"* ]]
 }
 
 @test "should handle HEAD as valid commit reference" {
-    touch gitcheck.yaml
+    create_valid_yaml
     run ./gitcheck --config gitcheck.yaml --commit HEAD --only=validate
     [ "$status" -eq 0 ]
     HASH=$(echo "$output" | grep 'Commit hash:' | awk '{print $3}')
@@ -59,20 +77,21 @@ teardown() {
 
 @test "should handle short commit hash" {
     SHORT_HASH=$(git rev-parse --short HEAD)
-    touch gitcheck.yaml
+    create_valid_yaml
     run ./gitcheck --config gitcheck.yaml --commit "$SHORT_HASH" --only=validate
     [ "$status" -eq 0 ]
     [[ "$output" == *"Commit hash: $SHORT_HASH"* ]]
 }
 
 @test "should fail with invalid commit hash" {
-    touch gitcheck.yaml
+    create_valid_yaml
     run ./gitcheck --config gitcheck.yaml --commit invalid_hash --only=validate
     [ "$status" -ne 0 ]
     [[ "$output" == *"Error: Commit hash 'invalid_hash' does not exist or is not a commit."* ]]
 }
 
 @test "should use latest commit when no hash specified" {
+    create_valid_yaml
     run ./gitcheck --only=validate
     [ "$status" -eq 0 ]
     # Should contain the current HEAD commit hash

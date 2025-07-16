@@ -135,6 +135,100 @@ display_configuration() {
 }
 
 # =============================================================================
+# YAML VALIDATION
+# =============================================================================
+
+# Function to validate YAML configuration structure
+validate_yaml_config() {
+    local yaml_file="$1"
+    
+    echo "Validating YAML configuration..."
+    
+    # Check if file is valid YAML
+    if ! yq eval '.' "$yaml_file" >/dev/null 2>&1; then
+        echo "Error: '$yaml_file' is not a valid YAML file"
+        exit 1
+    fi
+    
+    # Check for required top-level keys
+    local required_keys=("preflight" "checks" "metrics")
+    for key in "${required_keys[@]}"; do
+        if ! yq eval ".$key" "$yaml_file" >/dev/null 2>&1 || [[ "$(yq eval ".$key" "$yaml_file" 2>/dev/null)" == "null" ]]; then
+            echo "Error: Missing required key '$key' in configuration"
+            exit 1
+        fi
+    done
+    
+    # Validate preflight section structure
+    local preflight_count=$(yq eval '.preflight | length' "$yaml_file" 2>/dev/null || echo "0")
+    if [[ "$preflight_count" -eq 0 ]]; then
+        echo "Warning: No preflight commands found"
+    else
+        for i in $(seq 0 $((preflight_count - 1))); do
+            local name_exists=$(yq eval ".preflight[$i].name" "$yaml_file" 2>/dev/null)
+            local command_exists=$(yq eval ".preflight[$i].command" "$yaml_file" 2>/dev/null)
+            
+            if [[ "$name_exists" == "null" ]] || [[ -z "$name_exists" ]]; then
+                echo "Error: Preflight command $((i+1)) missing 'name' field"
+                exit 1
+            fi
+            if [[ "$command_exists" == "null" ]] || [[ -z "$command_exists" ]]; then
+                echo "Error: Preflight command $((i+1)) missing 'command' field"
+                exit 1
+            fi
+        done
+    fi
+    
+    # Validate checks section structure
+    local checks_count=$(yq eval '.checks | length' "$yaml_file" 2>/dev/null || echo "0")
+    if [[ "$checks_count" -eq 0 ]]; then
+        echo "Warning: No checks commands found"
+    else
+        for i in $(seq 0 $((checks_count - 1))); do
+            local name_exists=$(yq eval ".checks[$i].name" "$yaml_file" 2>/dev/null)
+            local command_exists=$(yq eval ".checks[$i].command" "$yaml_file" 2>/dev/null)
+            
+            if [[ "$name_exists" == "null" ]] || [[ -z "$name_exists" ]]; then
+                echo "Error: Checks command $((i+1)) missing 'name' field"
+                exit 1
+            fi
+            if [[ "$command_exists" == "null" ]] || [[ -z "$command_exists" ]]; then
+                echo "Error: Checks command $((i+1)) missing 'command' field"
+                exit 1
+            fi
+        done
+    fi
+    
+    # Validate metrics section structure
+    local metrics_count=$(yq eval '.metrics | length' "$yaml_file" 2>/dev/null || echo "0")
+    if [[ "$metrics_count" -eq 0 ]]; then
+        echo "Warning: No metrics commands found"
+    else
+        for i in $(seq 0 $((metrics_count - 1))); do
+            local name_exists=$(yq eval ".metrics[$i].name" "$yaml_file" 2>/dev/null)
+            local command_exists=$(yq eval ".metrics[$i].command" "$yaml_file" 2>/dev/null)
+            local allowed_values_exists=$(yq eval ".metrics[$i].allowed_values" "$yaml_file" 2>/dev/null)
+            
+            if [[ "$name_exists" == "null" ]] || [[ -z "$name_exists" ]]; then
+                echo "Error: Metrics command $((i+1)) missing 'name' field"
+                exit 1
+            fi
+            if [[ "$command_exists" == "null" ]] || [[ -z "$command_exists" ]]; then
+                echo "Error: Metrics command $((i+1)) missing 'command' field"
+                exit 1
+            fi
+            if [[ "$allowed_values_exists" == "null" ]] || [[ -z "$allowed_values_exists" ]]; then
+                echo "Error: Metrics command $((i+1)) missing 'allowed_values' field"
+                exit 1
+            fi
+        done
+    fi
+    
+    echo "✅ YAML configuration validation passed"
+    echo ""
+}
+
+# =============================================================================
 # YAML PARSING AND EXECUTION
 # =============================================================================
 
@@ -229,6 +323,9 @@ execute_yaml_section() {
 process_arguments "$@"
 validate_arguments
 display_configuration 
+
+# Validate YAML configuration
+validate_yaml_config "$CONFIG_FILE"
 
 # Ensure artefact folder exists
 ARTEFACT_DIR=".gitcheck"

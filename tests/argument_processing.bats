@@ -12,6 +12,23 @@ setup() {
     chmod +x gitcheck
 }
 
+# Helper function to create a minimal valid YAML file
+create_valid_yaml() {
+    local filename="${1:-gitcheck.yaml}"
+    cat > "$filename" << 'EOF'
+preflight:
+  - name: "test_preflight"
+    command: "echo 'preflight test'"
+checks:
+  - name: "test_check"
+    command: "echo 'check test'"
+metrics:
+  - name: "test_metric"
+    command: "echo 'metric test'"
+    allowed_values: ["test"]
+EOF
+}
+
 teardown() {
     # Clean up temporary directory
     rm -rf "$TEST_DIR"
@@ -24,7 +41,7 @@ teardown() {
     echo "test" > test.txt
     git add test.txt >/dev/null 2>&1
     git commit -m "test" >/dev/null 2>&1
-    touch gitcheck.yaml
+    create_valid_yaml
     
     run ./gitcheck --only=validate
     [ "$status" -eq 0 ]
@@ -38,7 +55,7 @@ teardown() {
     echo "test" > test.txt
     git add test.txt >/dev/null 2>&1
     git commit -m "test" >/dev/null 2>&1
-    touch gitcheck.yaml
+    create_valid_yaml
     
     run ./gitcheck --only=validate
     [ "$status" -eq 0 ]
@@ -55,7 +72,7 @@ teardown() {
     echo "test" > test.txt
     git add test.txt >/dev/null 2>&1
     git commit -m "test" >/dev/null 2>&1
-    touch my-config.yaml
+    create_valid_yaml my-config.yaml
     
     run ./gitcheck --config my-config.yaml --only=validate
     [ "$status" -eq 0 ]
@@ -69,7 +86,7 @@ teardown() {
     echo "test" > test.txt
     git add test.txt >/dev/null 2>&1
     git commit -m "test" >/dev/null 2>&1
-    touch gitcheck.yaml
+    create_valid_yaml
     HASH=$(git rev-parse HEAD)
     
     run ./gitcheck --commit "$HASH" --only=validate
@@ -84,7 +101,7 @@ teardown() {
     echo "test" > test.txt
     git add test.txt >/dev/null 2>&1
     git commit -m "test" >/dev/null 2>&1
-    touch my-config.yaml
+    create_valid_yaml my-config.yaml
     HASH=$(git rev-parse HEAD)
     
     run ./gitcheck --config my-config.yaml --commit "$HASH" --only=validate
@@ -100,7 +117,7 @@ teardown() {
     echo "test" > test.txt
     git add test.txt >/dev/null 2>&1
     git commit -m "test" >/dev/null 2>&1
-    touch gitcheck.yaml
+    create_valid_yaml
     
     run ./gitcheck --only=preflight
     [ "$status" -eq 0 ]
@@ -114,7 +131,7 @@ teardown() {
     echo "test" > test.txt
     git add test.txt >/dev/null 2>&1
     git commit -m "test" >/dev/null 2>&1
-    touch gitcheck.yaml
+    create_valid_yaml
     
     run ./gitcheck --only=checks
     [ "$status" -eq 0 ]
@@ -128,7 +145,7 @@ teardown() {
     echo "test" > test.txt
     git add test.txt >/dev/null 2>&1
     git commit -m "test" >/dev/null 2>&1
-    touch my-config.yaml
+    create_valid_yaml my-config.yaml
     HASH=$(git rev-parse HEAD)
     
     run ./gitcheck --config my-config.yaml --commit "$HASH" --only=checks
