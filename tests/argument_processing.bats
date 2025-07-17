@@ -25,7 +25,9 @@ checks:
 metrics:
   - name: "test_metric"
     command: "echo 'metric test'"
+    data_type: "string"
     allowed_values: ["test"]
+    default: "test"
 EOF
 }
 

@@ -38,7 +38,9 @@ checks:
 metrics:
   - name: "test_metric"
     command: "echo 'metric test'"
+    data_type: "string"
     allowed_values: ["test"]
+    default: "test"
 EOF
 }
 
@@ -64,7 +66,9 @@ checks:
 metrics:
   - name: "test_metric"
     command: "echo 'metric test'"
+    data_type: "string"
     allowed_values: ["test"]
+    default: "test"
 EOF
     run ./gitcheck --only=validate
     [ "$status" -eq 1 ]
@@ -79,7 +83,9 @@ preflight:
 metrics:
   - name: "test_metric"
     command: "echo 'metric test'"
+    data_type: "string"
     allowed_values: ["test"]
+    default: "test"
 EOF
     run ./gitcheck --only=validate
     [ "$status" -eq 1 ]
@@ -110,7 +116,9 @@ checks:
 metrics:
   - name: "test_metric"
     command: "echo 'metric test'"
+    data_type: "string"
     allowed_values: ["test"]
+    default: "test"
 EOF
     run ./gitcheck --only=validate
     [ "$status" -eq 1 ]
@@ -127,7 +135,9 @@ checks:
 metrics:
   - name: "test_metric"
     command: "echo 'metric test'"
+    data_type: "string"
     allowed_values: ["test"]
+    default: "test"
 EOF
     run ./gitcheck --only=validate
     [ "$status" -eq 1 ]
@@ -144,7 +154,9 @@ checks:
 metrics:
   - name: "test_metric"
     command: "echo 'metric test'"
+    data_type: "string"
     allowed_values: ["test"]
+    default: "test"
 EOF
     run ./gitcheck --only=validate
     [ "$status" -eq 1 ]
@@ -161,7 +173,9 @@ checks:
 metrics:
   - name: "test_metric"
     command: "echo 'metric test'"
+    data_type: "string"
     allowed_values: ["test"]
+    default: "test"
 EOF
     run ./gitcheck --only=validate
     [ "$status" -eq 1 ]
@@ -178,7 +192,9 @@ checks:
     command: "echo 'check test'"
 metrics:
   - command: "echo 'metric test'"
+    data_type: "string"
     allowed_values: ["test"]
+    default: "test"
 EOF
     run ./gitcheck --only=validate
     [ "$status" -eq 1 ]
@@ -195,7 +211,9 @@ checks:
     command: "echo 'check test'"
 metrics:
   - name: "test_metric"
+    data_type: "string"
     allowed_values: ["test"]
+    default: "test"
 EOF
     run ./gitcheck --only=validate
     [ "$status" -eq 1 ]
@@ -213,6 +231,8 @@ checks:
 metrics:
   - name: "test_metric"
     command: "echo 'metric test'"
+    data_type: "string"
+    default: "test"
 EOF
     run ./gitcheck --only=validate
     [ "$status" -eq 1 ]
@@ -248,10 +268,14 @@ checks:
 metrics:
   - name: "metric1"
     command: "echo 'metric1'"
+    data_type: "string"
     allowed_values: ["value1", "value2"]
+    default: "value1"
   - name: "metric2"
     command: "echo 'metric2'"
+    data_type: "string"
     allowed_values: ["value3", "value4"]
+    default: "value3"
 EOF
     run ./gitcheck --only=validate
     [ "$status" -eq 0 ]
@@ -269,7 +293,9 @@ checks:
 metrics:
   - name: "complex_metric"
     command: "echo 'complex'"
+    data_type: "string"
     allowed_values: ["0-100", "101-500", "501-1000", "1001+"]
+    default: "0-100"
 EOF
     run ./gitcheck --only=validate
     [ "$status" -eq 0 ]

@@ -30,6 +30,7 @@ set -euo pipefail
 CONFIG_FILE="gitcheck.yaml"
 COMMIT_HASH=""
 ONLY_PHASE=""
+VERBOSE=false
 
 # =============================================================================
 # UTILITY FUNCTIONS
@@ -48,12 +49,14 @@ Options:
     --config|-c    Path to gitcheck.yaml file (default: gitcheck.yaml)
     --commit|-C    Git commit hash to evaluate (default: latest commit of current branch)
     --only=PHASE   Run only the specified phase (validate, preflight, checks, metrics)
+    --verbose      Print command output to terminal (default: only log to files)
 
 Examples:
     gitcheck                                    # Use defaults
     gitcheck my-config.yaml                    # Custom config, latest commit
     gitcheck gitcheck.yaml abc1234             # Specific commit
     gitcheck my-config.yaml HEAD --only=checks # Custom config, HEAD, checks only
+    gitcheck --verbose                         # Print output to terminal
 EOF
     exit 1
 }
@@ -82,6 +85,10 @@ process_arguments() {
                     usage
                 fi
                 ONLY_PHASE="${1#--only=}"
+                shift
+                ;;
+            --verbose)
+                VERBOSE=true
                 shift
                 ;;
             --help|-h)
@@ -136,6 +143,7 @@ display_configuration() {
     echo "  Config file: $CONFIG_FILE"
     echo "  Commit hash: $COMMIT_HASH"
     echo "  Only phase: $ONLY_PHASE"
+    echo "  Verbose: $VERBOSE"
     echo ""
 }
 
@@ -155,122 +163,139 @@ validate_yaml_config() {
         exit 1
     fi
     
-    # Check for required top-level keys
-    local required_keys=("preflight" "checks" "metrics")
-    for key in "${required_keys[@]}"; do
+    # Determine which sections to validate based on --only flag
+    local sections_to_validate=()
+    if [[ -z "$ONLY_PHASE" ]]; then
+        # If no --only flag, validate all sections
+        sections_to_validate=("preflight" "checks" "metrics")
+    else
+        # Only validate the section for the specified phase
+        case "$ONLY_PHASE" in
+            preflight) sections_to_validate=("preflight") ;;
+            checks) sections_to_validate=("checks") ;;
+            metrics) sections_to_validate=("metrics") ;;
+            validate) sections_to_validate=("preflight" "checks" "metrics") ;;
+        esac
+    fi
+    
+    # Check for required top-level keys (only the ones we're validating)
+    for key in "${sections_to_validate[@]}"; do
         if ! yq eval ".$key" "$yaml_file" >/dev/null 2>&1 || [[ "$(yq eval ".$key" "$yaml_file" 2>/dev/null)" == "null" ]]; then
             echo "Error: Missing required key '$key' in configuration"
             exit 1
         fi
     done
     
-    # Validate preflight section structure
-    local preflight_count=$(yq eval '.preflight | length' "$yaml_file" 2>/dev/null || echo "0")
-    if [[ "$preflight_count" -eq 0 ]]; then
-        echo "Warning: No preflight commands found"
-    else
-        for i in $(seq 0 $((preflight_count - 1))); do
-            local name_exists=$(yq eval ".preflight[$i].name" "$yaml_file" 2>/dev/null)
-            local command_exists=$(yq eval ".preflight[$i].command" "$yaml_file" 2>/dev/null)
-            
-            if [[ "$name_exists" == "null" ]] || [[ -z "$name_exists" ]]; then
-                echo "Error: Preflight command $((i+1)) missing 'name' field"
-                exit 1
-            fi
-            if [[ "$command_exists" == "null" ]] || [[ -z "$command_exists" ]]; then
-                echo "Error: Preflight command $((i+1)) missing 'command' field"
-                exit 1
-            fi
-        done
-    fi
-    
-    # Validate checks section structure
-    local checks_count=$(yq eval '.checks | length' "$yaml_file" 2>/dev/null || echo "0")
-    if [[ "$checks_count" -eq 0 ]]; then
-        echo "Warning: No checks commands found"
-    else
-        for i in $(seq 0 $((checks_count - 1))); do
-            local name_exists=$(yq eval ".checks[$i].name" "$yaml_file" 2>/dev/null)
-            local command_exists=$(yq eval ".checks[$i].command" "$yaml_file" 2>/dev/null)
-            
-            if [[ "$name_exists" == "null" ]] || [[ -z "$name_exists" ]]; then
-                echo "Error: Checks command $((i+1)) missing 'name' field"
-                exit 1
-            fi
-            if [[ "$command_exists" == "null" ]] || [[ -z "$command_exists" ]]; then
-                echo "Error: Checks command $((i+1)) missing 'command' field"
-                exit 1
-            fi
-        done
-    fi
-    
-    # Validate metrics section structure
-    local metrics_count=$(yq eval '.metrics | length' "$yaml_file" 2>/dev/null || echo "0")
-    if [[ "$metrics_count" -eq 0 ]]; then
-        echo "Warning: No metrics commands found"
-    else
-        for i in $(seq 0 $((metrics_count - 1))); do
-            local name_exists=$(yq eval ".metrics[$i].name" "$yaml_file" 2>/dev/null)
-            local command_exists=$(yq eval ".metrics[$i].command" "$yaml_file" 2>/dev/null)
-            local allowed_values_exists=$(yq eval ".metrics[$i].allowed_values" "$yaml_file" 2>/dev/null)
-            local data_type_exists=$(yq eval ".metrics[$i].data_type" "$yaml_file" 2>/dev/null)
-            local default_exists=$(yq eval ".metrics[$i].default" "$yaml_file" 2>/dev/null)
-            local allowed_values_json=$(yq eval -o=json ".metrics[$i].allowed_values" "$yaml_file" 2>/dev/null)
-            local data_type=$(yq eval ".metrics[$i].data_type" "$yaml_file" 2>/dev/null)
-            local default_value=$(yq eval ".metrics[$i].default" "$yaml_file" 2>/dev/null)
-            
-            if [[ "$name_exists" == "null" ]] || [[ -z "$name_exists" ]]; then
-                echo "Error: Metrics command $((i+1)) missing 'name' field"
-                exit 1
-            fi
-            if [[ "$command_exists" == "null" ]] || [[ -z "$command_exists" ]]; then
-                echo "Error: Metrics command $((i+1)) missing 'command' field"
-                exit 1
-            fi
-            if [[ "$allowed_values_exists" == "null" ]] || [[ -z "$allowed_values_exists" ]]; then
-                echo "Error: Metrics command $((i+1)) missing 'allowed_values' field"
-                exit 1
-            fi
-            if [[ "$data_type_exists" == "null" ]] || [[ -z "$data_type_exists" ]]; then
-                echo "Error: Metrics command $((i+1)) missing 'data_type' field"
-                exit 1
-            fi
-            if [[ "$default_exists" == "null" ]] || [[ -z "$default_exists" ]]; then
-                echo "Error: Metrics command $((i+1)) missing 'default' field"
-                exit 1
-            fi
-            # Validate default is in allowed range/set
-            local default_valid=0
-            if [[ "$data_type" == "number" ]]; then
-                # Check if default is in any allowed range or matches an allowed value
-                for allowed_val in $(echo "$allowed_values_json" | jq -r '.[]'); do
-                    if [[ "$allowed_val" =~ ^([0-9]+(\.[0-9]+)?)-([0-9]+(\.[0-9]+)?)$ ]]; then
-                        local range_min="${BASH_REMATCH[1]}"
-                        local range_max="${BASH_REMATCH[3]}"
-                        if (( $(echo "$default_value >= $range_min && $default_value <= $range_max" | bc -l) )); then
-                            default_valid=1
-                            break
+    # Validate sections based on what we're running
+    for section in "${sections_to_validate[@]}"; do
+        case "$section" in
+            preflight)
+                local preflight_count=$(yq eval '.preflight | length' "$yaml_file" 2>/dev/null || echo "0")
+                if [[ "$preflight_count" -eq 0 ]]; then
+                    echo "Warning: No preflight commands found"
+                else
+                    for i in $(seq 0 $((preflight_count - 1))); do
+                        local name_exists=$(yq eval ".preflight[$i].name" "$yaml_file" 2>/dev/null)
+                        local command_exists=$(yq eval ".preflight[$i].command" "$yaml_file" 2>/dev/null)
+                        
+                        if [[ "$name_exists" == "null" ]] || [[ -z "$name_exists" ]]; then
+                            echo "Error: Preflight command $((i+1)) missing 'name' field"
+                            exit 1
                         fi
-                    elif [[ "$allowed_val" == "$default_value" ]]; then
-                        default_valid=1
-                        break
-                    fi
-                done
-            else
-                # For string, must be in allowed_values set
-                for allowed_val in $(echo "$allowed_values_json" | jq -r '.[]'); do
-                    if [[ "$allowed_val" == "$default_value" ]]; then
-                        default_valid=1
-                        break
-                    fi
-                done
-            fi
-            if [[ $default_valid -ne 1 ]]; then
-                echo "Error: Metrics command $((i+1)) has a default value ('$default_value') not in allowed_values."
-                exit 1
-            fi
-        done
-    fi
+                        if [[ "$command_exists" == "null" ]] || [[ -z "$command_exists" ]]; then
+                            echo "Error: Preflight command $((i+1)) missing 'command' field"
+                            exit 1
+                        fi
+                    done
+                fi
+                ;;
+            checks)
+                local checks_count=$(yq eval '.checks | length' "$yaml_file" 2>/dev/null || echo "0")
+                if [[ "$checks_count" -eq 0 ]]; then
+                    echo "Warning: No checks commands found"
+                else
+                    for i in $(seq 0 $((checks_count - 1))); do
+                        local name_exists=$(yq eval ".checks[$i].name" "$yaml_file" 2>/dev/null)
+                        local command_exists=$(yq eval ".checks[$i].command" "$yaml_file" 2>/dev/null)
+                        
+                        if [[ "$name_exists" == "null" ]] || [[ -z "$name_exists" ]]; then
+                            echo "Error: Checks command $((i+1)) missing 'name' field"
+                            exit 1
+                        fi
+                        if [[ "$command_exists" == "null" ]] || [[ -z "$command_exists" ]]; then
+                            echo "Error: Checks command $((i+1)) missing 'command' field"
+                            exit 1
+                        fi
+                    done
+                fi
+                ;;
+            metrics)
+                local metrics_count=$(yq eval '.metrics | length' "$yaml_file" 2>/dev/null || echo "0")
+                if [[ "$metrics_count" -eq 0 ]]; then
+                    echo "Warning: No metrics commands found"
+                else
+                    for i in $(seq 0 $((metrics_count - 1))); do
+                        local name_exists=$(yq eval ".metrics[$i].name" "$yaml_file" 2>/dev/null)
+                        local command_exists=$(yq eval ".metrics[$i].command" "$yaml_file" 2>/dev/null)
+                        local allowed_values_exists=$(yq eval ".metrics[$i].allowed_values" "$yaml_file" 2>/dev/null)
+                        local data_type_exists=$(yq eval ".metrics[$i].data_type" "$yaml_file" 2>/dev/null)
+                        local default_exists=$(yq eval ".metrics[$i].default" "$yaml_file" 2>/dev/null)
+                        local allowed_values_json=$(yq eval -o=json ".metrics[$i].allowed_values" "$yaml_file" 2>/dev/null)
+                        local data_type=$(yq eval ".metrics[$i].data_type" "$yaml_file" 2>/dev/null)
+                        local default_value=$(yq eval ".metrics[$i].default" "$yaml_file" 2>/dev/null)
+                        
+                        if [[ "$name_exists" == "null" ]] || [[ -z "$name_exists" ]]; then
+                            echo "Error: Metrics command $((i+1)) missing 'name' field"
+                            exit 1
+                        fi
+                        if [[ "$command_exists" == "null" ]] || [[ -z "$command_exists" ]]; then
+                            echo "Error: Metrics command $((i+1)) missing 'command' field"
+                            exit 1
+                        fi
+                        if [[ "$allowed_values_exists" == "null" ]] || [[ -z "$allowed_values_exists" ]]; then
+                            echo "Error: Metrics command $((i+1)) missing 'allowed_values' field"
+                            exit 1
+                        fi
+                        if [[ "$data_type_exists" == "null" ]] || [[ -z "$data_type_exists" ]]; then
+                            echo "Error: Metrics command $((i+1)) missing 'data_type' field"
+                            exit 1
+                        fi
+                        if [[ "$default_exists" == "null" ]] || [[ -z "$default_exists" ]]; then
+                            echo "Error: Metrics command $((i+1)) missing 'default' field"
+                            exit 1
+                        fi
+                        # Validate default is in allowed range/set
+                        local default_valid=0
+                        if [[ "$data_type" == "number" ]]; then
+                            # Check if default is in any allowed range or matches an allowed value
+                            for allowed_val in $(echo "$allowed_values_json" | jq -r '.[]'); do
+                                if [[ "$allowed_val" =~ ^([0-9]+(\.[0-9]+)?)-([0-9]+(\.[0-9]+)?)$ ]]; then
+                                    local range_min="${BASH_REMATCH[1]}"
+                                    local range_max="${BASH_REMATCH[3]}"
+                                    if (( $(echo "$default_value >= $range_min && $default_value <= $range_max" | bc -l) )); then
+                                        default_valid=1
+                                        break
+                                    fi
+                                elif [[ "$allowed_val" == "$default_value" ]]; then
+                                    default_valid=1
+                                    break
+                                fi
+                            done
+                        else
+                            # For string, must be in allowed_values set
+                            if jq -e --arg val "$default_value" '. | index($val)' <<< "$allowed_values_json" >/dev/null; then
+                                default_valid=1
+                            fi
+                        fi
+                        if [[ $default_valid -ne 1 ]]; then
+                            echo "Error: Metrics command $((i+1)) has a default value ('$default_value') not in allowed_values."
+                            exit 1
+                        fi
+                    done
+                fi
+                ;;
+        esac
+    done
     
     echo "✅ YAML configuration validation passed"
     echo ""
@@ -320,6 +345,7 @@ execute_yaml_section() {
         echo "Saving output to: $artefact_file"
         (
             set +e
+            # Write header to artefact file
             {
                 echo "# GitCheck Artefact: $name"
                 echo "# Generated: $(date)"
@@ -327,9 +353,13 @@ execute_yaml_section() {
                 echo "# Phase: $phase_name"
                 echo "# ========================================="
                 echo ""
-            } | tee "$artefact_file"
-            # Now run the command, teeing both stdout and stderr to the artefact file and terminal
-            eval "$command" 2>&1 | tee -a "$artefact_file"
+            } > "$artefact_file"
+            # Run the command, conditionally printing to terminal based on verbose flag
+            if [[ "$VERBOSE" == "true" ]]; then
+                eval "$command" 2>&1 | tee -a "$artefact_file"
+            else
+                eval "$command" 2>&1 >> "$artefact_file"
+            fi
             exit_status=${PIPESTATUS[0]}
             exit $exit_status
         )
@@ -396,6 +426,7 @@ execute_metrics_phase() {
         tmp_output_file=$(mktemp)
         (
             set +e
+            # Write header to artefact file
             {
                 echo "# GitCheck Metric Artefact: $name"
                 echo "# Generated: $(date)"
@@ -404,11 +435,16 @@ execute_metrics_phase() {
                 echo "# Phase: $phase_name"
                 echo "# ========================================="
                 echo ""
-            } | tee "$artefact_file"
+            } > "$artefact_file"
             # Run the command, capture output (stdout only, trimmed)
             metric_output=$(eval "$command" 2>&1)
             metric_status=${PIPESTATUS[0]}
-            echo "$metric_output" | tee -a "$artefact_file"
+            # Conditionally print to terminal based on verbose flag
+            if [[ "$VERBOSE" == "true" ]]; then
+                echo "$metric_output" | tee -a "$artefact_file"
+            else
+                echo "$metric_output" >> "$artefact_file"
+            fi
             # Only use first line of output for value comparison
             echo "$metric_output" | head -n1 | xargs > "$tmp_output_file"
             exit $metric_status

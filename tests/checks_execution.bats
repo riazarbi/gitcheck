@@ -38,7 +38,9 @@ checks:
 metrics:
   - name: "test_metric"
     command: "echo 'metric test'"
+    data_type: "string"
     allowed_values: ["test"]
+    default: "test"
 EOF
 }
 
@@ -64,7 +66,9 @@ checks:
 metrics:
   - name: "test_metric"
     command: "echo 'metric test'"
+    data_type: "string"
     allowed_values: ["test"]
+    default: "test"
 EOF
 }
 
@@ -140,7 +144,9 @@ checks:
 metrics:
   - name: "test_metric"
     command: "echo 'metric test'"
+    data_type: "string"
     allowed_values: ["test"]
+    default: "test"
 EOF
     
     run ./gitcheck --only=checks
@@ -162,7 +168,9 @@ checks: []
 metrics:
   - name: "test_metric"
     command: "echo 'metric test'"
+    data_type: "string"
     allowed_values: ["test"]
+    default: "test"
 EOF
     
     run ./gitcheck --only=checks
@@ -186,7 +194,9 @@ checks:
 metrics:
   - name: "test_metric"
     command: "echo 'metric test'"
+    data_type: "string"
     allowed_values: ["test"]
+    default: "test"
 EOF
     
     run ./gitcheck --only=checks
@@ -251,7 +261,9 @@ checks:
 metrics:
   - name: "test_metric"
     command: "echo 'metric test'"
+    data_type: "string"
     allowed_values: ["test"]
+    default: "test"
 EOF
     
     run ./gitcheck --only=checks
