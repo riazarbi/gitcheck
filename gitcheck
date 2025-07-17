@@ -31,6 +31,7 @@ CONFIG_FILE="gitcheck.yaml"
 COMMIT_HASH=""
 ONLY_PHASE=""
 VERBOSE=false
+TIMEOUT=300  # 5 minutes default timeout
 
 # =============================================================================
 # UTILITY FUNCTIONS
@@ -50,6 +51,7 @@ Options:
     --commit|-C    Git commit hash to evaluate (default: latest commit of current branch)
     --only=PHASE   Run only the specified phase (validate, preflight, checks, metrics)
     --verbose      Print command output to terminal (default: only log to files)
+    --timeout=N    Timeout in seconds for long-running commands (default: 300)
 
 Examples:
     gitcheck                                    # Use defaults
@@ -89,6 +91,15 @@ process_arguments() {
                 ;;
             --verbose)
                 VERBOSE=true
+                shift
+                ;;
+            --timeout=*)
+                TIMEOUT="${1#--timeout=}"
+                # Validate timeout is a positive integer
+                if ! [[ "$TIMEOUT" =~ ^[0-9]+$ ]] || [[ "$TIMEOUT" -eq 0 ]]; then
+                    echo "Error: Timeout must be a positive integer"
+                    usage
+                fi
                 shift
                 ;;
             --help|-h)
@@ -144,6 +155,7 @@ display_configuration() {
     echo "  Commit hash: $COMMIT_HASH"
     echo "  Only phase: $ONLY_PHASE"
     echo "  Verbose: $VERBOSE"
+    echo "  Timeout: ${TIMEOUT}s"
     echo ""
 }
 
@@ -305,16 +317,7 @@ validate_yaml_config() {
 # YAML PARSING AND EXECUTION
 # =============================================================================
 
-# Function to parse YAML file and extract commands from a section
-parse_yaml_section() {
-    local yaml_file="$1"
-    local section="$2"
-    if [[ ! -f "$yaml_file" ]]; then
-        echo "Error: Config file '$yaml_file' not found"
-        exit 1
-    fi
-    yq -o=json eval ".$section" "$yaml_file"
-}
+
 
 # Function to execute commands from a section
 execute_yaml_section() {
@@ -331,16 +334,26 @@ execute_yaml_section() {
     local success_count=0
     local total_count=0
 
-    # Remove debug output
-    # (No debug echo statements)
 
-    while IFS= read -r obj; do
+
+    # Simple approach: use yq to get command count and iterate directly
+    local command_count
+    command_count=$(yq eval ".$section | length" "$yaml_file")
+    
+    # Parse all section data once to avoid redundant yq calls
+    local section_data
+    section_data=$(yq eval -o=json ".$section" "$yaml_file")
+    
+    for ((i=0; i<command_count; i++)); do
         local name command
-        name=$(jq -r '.name' <<< "$obj")
-        command=$(jq -r '.command' <<< "$obj")
+        name=$(echo "$section_data" | jq -r ".[$i].name")
+        command=$(echo "$section_data" | jq -r ".[$i].command")
+        
         ((total_count++))
         echo "Running: $name"
-        echo "Command: $command"
+        if [[ "$VERBOSE" == "true" ]]; then
+            echo "Command: $command"
+        fi
         local artefact_file="$ARTEFACT_DIR/$name"
         echo "Saving output to: $artefact_file"
         (
@@ -354,32 +367,43 @@ execute_yaml_section() {
                 echo "# ========================================="
                 echo ""
             } > "$artefact_file"
-            # Run the command, conditionally printing to terminal based on verbose flag
+            # Run the command with timeout, conditionally printing to terminal based on verbose flag
             if [[ "$VERBOSE" == "true" ]]; then
-                eval "$command" 2>&1 | tee -a "$artefact_file"
+                timeout "$TIMEOUT" bash -c "$command" 2>&1 | tee -a "$artefact_file"
             else
-                eval "$command" 2>&1 >> "$artefact_file"
+                timeout "$TIMEOUT" bash -c "$command" 2>&1 >> "$artefact_file"
             fi
             exit_status=${PIPESTATUS[0]}
+            # Handle timeout exit code (124)
+            if [[ $exit_status -eq 124 ]]; then
+                echo "TIMEOUT: Command exceeded ${TIMEOUT}s timeout" >> "$artefact_file"
+                exit 124
+            fi
             exit $exit_status
         )
         local exit_status=$?
         # For checks phase, treat any exit code as success (command executed)
         # The non-zero exit codes indicate issues found, not execution failure
         if [[ "$section" == "checks" ]]; then
-            echo "✅ $name: EXECUTED (exit code: $exit_status)"
+            if [[ $exit_status -eq 124 ]]; then
+                echo "⏰ $name: TIMEOUT (exceeded ${TIMEOUT}s)"
+            else
+                echo "✅ $name: EXECUTED (exit code: $exit_status)"
+            fi
             ((success_count++))
         else
             # For other phases (preflight), treat non-zero as failure
             if [[ $exit_status -eq 0 ]]; then
                 echo "✅ $name: SUCCESS"
                 ((success_count++))
+            elif [[ $exit_status -eq 124 ]]; then
+                echo "⏰ $name: TIMEOUT (exceeded ${TIMEOUT}s)"
             else
                 echo "❌ $name: FAILED (exit code: $exit_status)"
             fi
         fi
         echo ""
-    done < <(parse_yaml_section "$yaml_file" "$section" | jq -c '.[]')
+    done
     echo ""
     
     # Re-enable set -e
@@ -396,6 +420,8 @@ execute_yaml_section() {
     fi
 }
 
+
+
 # Function to execute metrics phase
 execute_metrics_phase() {
     set +e
@@ -410,16 +436,25 @@ execute_metrics_phase() {
     echo "Running $phase_name phase..."
     echo "=================================="
 
-    while IFS= read -r obj; do
+    local metrics_count
+    metrics_count=$(yq eval ".metrics | length" "$yaml_file")
+    
+    # Parse all metrics data once to avoid redundant yq calls
+    local metrics_data
+    metrics_data=$(yq eval -o=json ".metrics" "$yaml_file")
+    
+    for ((i=0; i<metrics_count; i++)); do
         local name command allowed_values data_type default_value
-        name=$(jq -r '.name' <<< "$obj")
-        command=$(jq -r '.command' <<< "$obj")
-        allowed_values=$(jq -c '.allowed_values' <<< "$obj")
-        data_type=$(jq -r '.data_type' <<< "$obj")
-        default_value=$(jq -r '.default' <<< "$obj")
+        name=$(echo "$metrics_data" | jq -r ".[$i].name")
+        command=$(echo "$metrics_data" | jq -r ".[$i].command")
+        allowed_values=$(echo "$metrics_data" | jq -c ".[$i].allowed_values")
+        data_type=$(echo "$metrics_data" | jq -r ".[$i].data_type")
+        default_value=$(echo "$metrics_data" | jq -r ".[$i].default")
         ((total_count++))
         echo "Running metric: $name"
-        echo "Command: $command"
+        if [[ "$VERBOSE" == "true" ]]; then
+            echo "Command: $command"
+        fi
         local artefact_file="$metrics_dir/$name"
         echo "Saving output to: $artefact_file"
         local tmp_output_file
@@ -436,9 +471,14 @@ execute_metrics_phase() {
                 echo "# ========================================="
                 echo ""
             } > "$artefact_file"
-            # Run the command, capture output (stdout only, trimmed)
-            metric_output=$(eval "$command" 2>&1)
+            # Run the command with timeout, capture output (stdout only, trimmed)
+            metric_output=$(timeout "$TIMEOUT" bash -c "$command" 2>&1)
             metric_status=${PIPESTATUS[0]}
+            # Handle timeout exit code (124)
+            if [[ $metric_status -eq 124 ]]; then
+                echo "TIMEOUT: Command exceeded ${TIMEOUT}s timeout" >> "$artefact_file"
+                metric_output="TIMEOUT"
+            fi
             # Conditionally print to terminal based on verbose flag
             if [[ "$VERBOSE" == "true" ]]; then
                 echo "$metric_output" | tee -a "$artefact_file"
@@ -492,6 +532,11 @@ execute_metrics_phase() {
                 metric_status_str="default"
                 ((fail_count++))
             fi
+        elif [[ $exit_status -eq 124 ]]; then
+            echo "⏰ $name: TIMEOUT (exceeded ${TIMEOUT}s)"
+            metric_value="$default_value"
+            metric_status_str="default"
+            ((fail_count++))
         else
             echo "❌ $name: ERROR (command failed, exit code: $exit_status)"
             metric_value="$default_value"
@@ -501,7 +546,7 @@ execute_metrics_phase() {
         # Save result to results_json
         results_json=$(jq -c --arg name "$name" --arg value "$metric_value" --argjson allowed "$allowed_values" --arg status "$metric_status_str" '. += [{name: $name, value: $value, allowed_values: $allowed, status: $status}]' <<< "$results_json")
         echo ""
-    done < <(parse_yaml_section "$yaml_file" "metrics" | jq -c '.[]')
+    done
 
     # Always write metrics.json, even if some metrics fail
     echo "$results_json" | jq '.' > "$ARTEFACT_DIR/metrics.json"

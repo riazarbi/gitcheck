@@ -34,22 +34,15 @@ checks:
   - name: "security"
     command: "shellcheck gitcheck --severity=warning"
   
+  - name: "readme_assessment"
+    command: "claude --dangerously-skip-permissions -p \"$(cat .gitcheck/prompts/readme_assessment_prompt.md)\""
+
   - name: "coverage"
-    command: >
-      claude --dangerously-skip-permissions -p 'Generate a coverage report for the gitcheck script.  
-      The test results are at @.gitcheck/tests
-      The tests are in the @tests/ directory.
-      The code being tested is in the @gitcheck script.
-      Do not alter any files.
-      Do not create any files.
-      Do this noninteractively, without any chatter, until you output your final report.
-      The report should include the following sections:
-      - Total lines of code
-      - Total lines of test code
-      - Total lines of code covered by tests
-      - Total lines of code not covered by tests
-      - Percentage of code covered by tests
-      - Percentage of code not covered by tests'
+    command: "claude --dangerously-skip-permissions -p \"$(cat .gitcheck/prompts/coverage_prompt.md)\""
+
+  - name: "dummy"
+    command: "echo yes"
+
 
 # Metrics commands that generate structured data for analysis
 # Add commands here to:
@@ -87,4 +80,29 @@ metrics:
     command: "echo 'success'"
     data_type: "string"
     allowed_values: ["success", "warning", "failure"]
-    default: "failure" 
+    default: "failure"
+  
+  # Documentation Quality Metrics
+  - name: "has_project_purpose"
+    command: "head -10 README.md | grep -q '^## Purpose$' && echo 'true' || echo 'false'"
+    data_type: "string"
+    allowed_values: ["true", "false"]
+    default: "false"
+    
+  - name: "has_quick_start"
+    command: "grep -q '^## Quick Start$' README.md && echo 'true' || echo 'false'"
+    data_type: "string"
+    allowed_values: ["true", "false"]
+    default: "false"
+  
+  - name: "quick_start_works"
+    command: "head -1 .gitcheck/readme_assessment"
+    data_type: "string"
+    allowed_values: ["NONE", "NOT_WORKING", "WORKING"]
+    default: "NONE"
+    
+  - name: "functionality_purpose_alignment"
+    command: "head -2 .gitcheck/readme_assessment | tail -1"
+    data_type: "string"
+    allowed_values: ["PERFECT", "STRONG", "GOOD", "MODERATE", "WEAK", "POOR", "NONE"]
+    default: "NONE"

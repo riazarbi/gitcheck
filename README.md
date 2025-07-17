@@ -9,6 +9,37 @@ GitCheck operates in three distinct phases:
 2. **Checks** - Quality assessment commands (linting, coverage, etc.)
 3. **Metrics** - Compilation of quality scores from artefact files
 
+## Quick Start
+
+GitCheck is implemented as a single bash script, and should work on most systems where bash is available.
+
+To operate correctly, it needs `yq`, `jq` and `git` to be installed.
+
+1. **Download and install GitCheck:**
+   ```bash
+   curl -o gitcheck https://raw.githubusercontent.com/riazarbi/gitcheck/main/gitcheck
+   chmod +x gitcheck
+   sudo mv gitcheck /usr/local/bin/
+   ```
+
+3. **Create a configuration file** (`gitcheck.yaml`) in your repository root:
+   ```yaml
+   preflight: []
+   checks:
+     - name: "basic_check"
+       command: "echo 'Repository check passed'"
+     - name: "file_count" 
+       command: "find . -name '*.md' -o -name '*.sh' -o -name '*.py' -o -name '*.js' | wc -l"
+   metrics: []
+   ```
+
+4. **Run GitCheck:**
+   ```bash
+   gitcheck
+   ```
+
+That's it! GitCheck will analyze your code quality and generate reports in the `.gitcheck/` folder.
+
 ## Features
 
 - Configuration-driven quality evaluation via `gitcheck.yaml`
