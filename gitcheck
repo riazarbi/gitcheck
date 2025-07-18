@@ -16,49 +16,68 @@ if ! command -v jq >/dev/null 2>&1; then
     echo "Install from: https://stedolan.github.io/jq/download/" >&2
     exit 1
 fi
+if ! command -v bc >/dev/null 2>&1; then
+    echo "Error: bc is required but not installed." >&2
+    echo "Install from: https://www.gnu.org/software/bc/" >&2
+    exit 1
+fi
 
 # GitCheck - Quality assessment tool for code repositories
+# 
+# This script evaluates code repository quality using a YAML configuration file.
+# It runs commands against a specified commit hash (or latest if unspecified),
+# producing artefact files and a metrics.json file stored as a git note.
+#
+# The script operates in three phases:
+# 1. Preflight: Commands that must succeed before proceeding
+# 2. Checks: Commands that analyze the codebase (non-zero exit indicates issues)
+# 3. Metrics: Commands that produce measurable values with validation
+#
 # Usage: gitcheck [config_file] [commit_hash] [options]
 
+# Enable strict error handling:
+# -e: Exit immediately if any command fails
+# -u: Treat unset variables as errors
+# -o pipefail: Return exit code of first failed command in pipeline
 set -euo pipefail
 
 # =============================================================================
 # GLOBAL VARIABLES
 # =============================================================================
 
-# Default values
-CONFIG_FILE="gitcheck.yaml"
-COMMIT_HASH=""
-ONLY_PHASE=""
-VERBOSE=false
-TIMEOUT=300  # 5 minutes default timeout
+# Default values for script configuration
+CONFIG_FILE="gitcheck.yaml"    # Path to YAML configuration file
+COMMIT_HASH=""                 # Git commit hash to evaluate (empty = latest commit)
+ONLY_PHASE=""                  # If set, run only this specific phase
+VERBOSE=false                  # Whether to print command output to terminal
+TIMEOUT=300                    # Timeout in seconds for long-running commands (5 minutes)
 
 # =============================================================================
 # UTILITY FUNCTIONS
 # =============================================================================
 
-# Function to display usage
+# Function to display usage information and exit
+# This function provides comprehensive help text showing all available options
+# and examples of how to use the script
 usage() {
     cat << EOF
-Usage: gitcheck [config_file] [commit_hash] [options]
-
-Arguments:
-    config_file    Path to gitcheck.yaml file (default: gitcheck.yaml)
-    commit_hash    Git commit hash to evaluate (default: latest commit of current branch)
+Usage: gitcheck [options]
 
 Options:
-    --config|-c    Path to gitcheck.yaml file (default: gitcheck.yaml)
-    --commit|-C    Git commit hash to evaluate (default: latest commit of current branch)
-    --only=PHASE   Run only the specified phase (validate, preflight, checks, metrics)
-    --verbose      Print command output to terminal (default: only log to files)
-    --timeout=N    Timeout in seconds for long-running commands (default: 300)
+    --config|-c <file>     Path to gitcheck.yaml file (default: gitcheck.yaml)
+    --commit|-C <hash>     Git commit hash to evaluate (default: latest commit)
+    --only=PHASE          Run only the specified phase (validate, preflight, checks, metrics)
+    --verbose             Print command output to terminal (default: only log to files)
+    --timeout=N           Timeout in seconds for long-running commands (default: 300)
+    --help|-h             Show this help message
 
 Examples:
     gitcheck                                    # Use defaults
-    gitcheck my-config.yaml                    # Custom config, latest commit
-    gitcheck gitcheck.yaml abc1234             # Specific commit
-    gitcheck my-config.yaml HEAD --only=checks # Custom config, HEAD, checks only
+    gitcheck --config my-config.yaml           # Custom config file
+    gitcheck --commit abc1234                  # Specific commit
+    gitcheck --config my-config.yaml --commit HEAD --only=checks  # Custom config, HEAD, checks only
     gitcheck --verbose                         # Print output to terminal
+    gitcheck --timeout=600                     # Custom timeout (10 minutes)
 EOF
     exit 1
 }
@@ -67,33 +86,42 @@ EOF
 # ARGUMENT PROCESSING
 # =============================================================================
 
-# Process command line arguments
+# Process command line arguments and set global variables
+# This function parses all command line options and validates them
+# It handles both long-form (--option) and short-form (-o) arguments
 process_arguments() {
-    local only_count=0
+    local only_count=0  # Track number of --only flags (only one allowed)
+    
+    # Process all arguments until none remain
     while [[ $# -gt 0 ]]; do
         case $1 in
             --config|-c)
+                # Set custom configuration file path
                 CONFIG_FILE="$2"
-                shift 2
+                shift 2  # Consume both the flag and its value
                 ;;
             --commit|-C)
+                # Set specific commit hash to evaluate
                 COMMIT_HASH="$2"
                 shift 2
                 ;;
             --only=*)
+                # Set which phase to run (validate, preflight, checks, metrics)
                 ((only_count++))
                 if [[ $only_count -gt 1 ]]; then
                     echo "Error: Only one --only flag can be specified"
                     usage
                 fi
-                ONLY_PHASE="${1#--only=}"
+                ONLY_PHASE="${1#--only=}"  # Extract phase name after '='
                 shift
                 ;;
             --verbose)
+                # Enable verbose output (print command output to terminal)
                 VERBOSE=true
                 shift
                 ;;
             --timeout=*)
+                # Set custom timeout for long-running commands
                 TIMEOUT="${1#--timeout=}"
                 # Validate timeout is a positive integer
                 if ! [[ "$TIMEOUT" =~ ^[0-9]+$ ]] || [[ "$TIMEOUT" -eq 0 ]]; then
@@ -103,13 +131,16 @@ process_arguments() {
                 shift
                 ;;
             --help|-h)
+                # Display help and exit
                 usage
                 ;;
             -*)
+                # Unknown option flag
                 echo "Unknown option: $1"
                 usage
                 ;;
             *)
+                # Unknown positional argument
                 echo "Unknown positional argument: $1"
                 usage
                 ;;
@@ -117,12 +148,15 @@ process_arguments() {
     done
 }
 
-# Validate argument combinations
+# Validate argument combinations and resolve commit hash
+# This function ensures all arguments are valid and resolves the commit hash
+# to a specific commit reference that can be used by git commands
 validate_arguments() {
-    # Validate ONLY_PHASE
+    # Validate that the specified phase (if any) is one of the allowed values
     if [[ -n "$ONLY_PHASE" ]]; then
         case "$ONLY_PHASE" in
             validate|preflight|checks|metrics)
+                # Valid phase - continue
                 ;;
             *)
                 echo "Error: Unknown phase for --only: $ONLY_PHASE"
@@ -137,18 +171,22 @@ validate_arguments() {
     fi
 
     # Resolve HEAD to actual commit hash if needed
+    # This handles cases where user specifies "HEAD" instead of a specific hash
     if [[ "$COMMIT_HASH" == "HEAD" ]]; then
         COMMIT_HASH=$(git rev-parse HEAD)
     fi
 
-    # Validate that the commit hash exists
+    # Validate that the commit hash exists and is a valid commit
+    # This prevents errors when trying to run commands against non-existent commits
     if ! git cat-file -e "$COMMIT_HASH^{commit}" 2>/dev/null; then
         echo "Error: Commit hash '$COMMIT_HASH' does not exist or is not a commit."
         exit 1
     fi
 }
 
-# Display configuration
+# Display current configuration settings
+# This function shows the user what settings will be used for the current run
+# It helps with debugging and understanding what the script will do
 display_configuration() {
     echo "GitCheck Configuration:"
     echo "  Config file: $CONFIG_FILE"
@@ -164,24 +202,29 @@ display_configuration() {
 # =============================================================================
 
 # Function to validate YAML configuration structure
+# This function ensures the YAML file is valid and contains all required fields
+# It validates different sections based on which phases will be run
 validate_yaml_config() {
     local yaml_file="$1"
     
     echo "Validating YAML configuration..."
     
-    # Check if file is valid YAML
+    # Check if file is valid YAML syntax
+    # This catches basic YAML parsing errors before we try to extract data
     if ! yq eval '.' "$yaml_file" >/dev/null 2>&1; then
         echo "Error: '$yaml_file' is not a valid YAML file"
         exit 1
     fi
     
     # Determine which sections to validate based on --only flag
+    # This allows partial validation when running only specific phases
     local sections_to_validate=()
     if [[ -z "$ONLY_PHASE" ]]; then
-        # If no --only flag, validate all sections
+        # If no --only flag, validate all sections (full validation)
         sections_to_validate=("preflight" "checks" "metrics")
     else
         # Only validate the section for the specified phase
+        # This improves performance when running single phases
         case "$ONLY_PHASE" in
             preflight) sections_to_validate=("preflight") ;;
             checks) sections_to_validate=("checks") ;;
@@ -191,6 +234,7 @@ validate_yaml_config() {
     fi
     
     # Check for required top-level keys (only the ones we're validating)
+    # This ensures all required sections exist in the YAML file
     for key in "${sections_to_validate[@]}"; do
         if ! yq eval ".$key" "$yaml_file" >/dev/null 2>&1 || [[ "$(yq eval ".$key" "$yaml_file" 2>/dev/null)" == "null" ]]; then
             echo "Error: Missing required key '$key' in configuration"
@@ -199,13 +243,17 @@ validate_yaml_config() {
     done
     
     # Validate sections based on what we're running
+    # Each section has different validation requirements
     for section in "${sections_to_validate[@]}"; do
         case "$section" in
             preflight)
+                # Preflight commands must have 'name' and 'command' fields
+                # These are commands that must succeed before proceeding
                 local preflight_count=$(yq eval '.preflight | length' "$yaml_file" 2>/dev/null || echo "0")
                 if [[ "$preflight_count" -eq 0 ]]; then
                     echo "Warning: No preflight commands found"
                 else
+                    # Validate each preflight command has required fields
                     for i in $(seq 0 $((preflight_count - 1))); do
                         local name_exists=$(yq eval ".preflight[$i].name" "$yaml_file" 2>/dev/null)
                         local command_exists=$(yq eval ".preflight[$i].command" "$yaml_file" 2>/dev/null)
@@ -222,10 +270,13 @@ validate_yaml_config() {
                 fi
                 ;;
             checks)
+                # Checks commands must have 'name' and 'command' fields
+                # These are commands that analyze the codebase (non-zero exit indicates issues)
                 local checks_count=$(yq eval '.checks | length' "$yaml_file" 2>/dev/null || echo "0")
                 if [[ "$checks_count" -eq 0 ]]; then
                     echo "Warning: No checks commands found"
                 else
+                    # Validate each checks command has required fields
                     for i in $(seq 0 $((checks_count - 1))); do
                         local name_exists=$(yq eval ".checks[$i].name" "$yaml_file" 2>/dev/null)
                         local command_exists=$(yq eval ".checks[$i].command" "$yaml_file" 2>/dev/null)
@@ -242,10 +293,14 @@ validate_yaml_config() {
                 fi
                 ;;
             metrics)
+                # Metrics commands have the most complex validation requirements
+                # They must have: name, command, allowed_values, data_type, and default fields
+                # The default value must be within the allowed_values range/set
                 local metrics_count=$(yq eval '.metrics | length' "$yaml_file" 2>/dev/null || echo "0")
                 if [[ "$metrics_count" -eq 0 ]]; then
                     echo "Warning: No metrics commands found"
                 else
+                    # Validate each metrics command has all required fields
                     for i in $(seq 0 $((metrics_count - 1))); do
                         local name_exists=$(yq eval ".metrics[$i].name" "$yaml_file" 2>/dev/null)
                         local command_exists=$(yq eval ".metrics[$i].command" "$yaml_file" 2>/dev/null)
@@ -256,6 +311,7 @@ validate_yaml_config() {
                         local data_type=$(yq eval ".metrics[$i].data_type" "$yaml_file" 2>/dev/null)
                         local default_value=$(yq eval ".metrics[$i].default" "$yaml_file" 2>/dev/null)
                         
+                        # Check for required fields in metrics commands
                         if [[ "$name_exists" == "null" ]] || [[ -z "$name_exists" ]]; then
                             echo "Error: Metrics command $((i+1)) missing 'name' field"
                             exit 1
@@ -276,25 +332,29 @@ validate_yaml_config() {
                             echo "Error: Metrics command $((i+1)) missing 'default' field"
                             exit 1
                         fi
-                        # Validate default is in allowed range/set
+                        # Validate that the default value is within the allowed range/set
+                        # This ensures graceful degradation when commands fail
                         local default_valid=0
                         if [[ "$data_type" == "number" ]]; then
-                            # Check if default is in any allowed range or matches an allowed value
+                            # For numeric values, check if default is in any allowed range or matches an allowed value
                             for allowed_val in $(echo "$allowed_values_json" | jq -r '.[]'); do
                                 if [[ "$allowed_val" =~ ^([0-9]+(\.[0-9]+)?)-([0-9]+(\.[0-9]+)?)$ ]]; then
+                                    # Range format: "min-max" (e.g., "0-100", "1.5-2.5")
                                     local range_min="${BASH_REMATCH[1]}"
                                     local range_max="${BASH_REMATCH[3]}"
+                                    # Use bc for precise decimal comparison
                                     if (( $(echo "$default_value >= $range_min && $default_value <= $range_max" | bc -l) )); then
                                         default_valid=1
                                         break
                                     fi
                                 elif [[ "$allowed_val" == "$default_value" ]]; then
+                                    # Exact match for non-range values
                                     default_valid=1
                                     break
                                 fi
                             done
                         else
-                            # For string, must be in allowed_values set
+                            # For string values, must be in the allowed_values set
                             if jq -e --arg val "$default_value" '. | index($val)' <<< "$allowed_values_json" >/dev/null; then
                                 default_valid=1
                             fi
@@ -319,32 +379,38 @@ validate_yaml_config() {
 
 
 
-# Function to execute commands from a section
+# Function to execute commands from a YAML section (preflight or checks)
+# This function runs all commands in a section and handles their output
+# It creates artefact files for each command and reports success/failure
 execute_yaml_section() {
     # Temporarily disable set -e to allow command failures without exiting
+    # This is necessary because checks phase commands may fail (indicating issues found)
     set +e
     
-    local yaml_file="$1"
-    local section="$2"
-    local phase_name="$3"
+    local yaml_file="$1"      # Path to YAML configuration file
+    local section="$2"         # Section name (preflight or checks)
+    local phase_name="$3"      # Human-readable phase name for display
 
     echo "Running $phase_name phase..."
     echo "=================================="
 
-    local success_count=0
-    local total_count=0
+    local success_count=0      # Number of commands that executed successfully
+    local total_count=0        # Total number of commands in this section
 
 
 
-    # Simple approach: use yq to get command count and iterate directly
+    # Get the total number of commands in this section
     local command_count
     command_count=$(yq eval ".$section | length" "$yaml_file")
     
     # Parse all section data once to avoid redundant yq calls
+    # This improves performance by reducing the number of yq invocations
     local section_data
     section_data=$(yq eval -o=json ".$section" "$yaml_file")
     
+    # Execute each command in the section
     for ((i=0; i<command_count; i++)); do
+        # Extract command name and command string from the parsed data
         local name command
         name=$(echo "$section_data" | jq -r ".[$i].name")
         command=$(echo "$section_data" | jq -r ".[$i].command")
@@ -358,7 +424,7 @@ execute_yaml_section() {
         echo "Saving output to: $artefact_file"
         (
             set +e
-            # Write header to artefact file
+            # Write header to artefact file with metadata
             {
                 echo "# GitCheck Artefact: $name"
                 echo "# Generated: $(date)"
@@ -369,8 +435,10 @@ execute_yaml_section() {
             } > "$artefact_file"
             # Run the command with timeout, conditionally printing to terminal based on verbose flag
             if [[ "$VERBOSE" == "true" ]]; then
+                # Verbose mode: show output in terminal and save to file
                 timeout "$TIMEOUT" bash -c "$command" 2>&1 | tee -a "$artefact_file"
             else
+                # Quiet mode: save output to file only
                 timeout "$TIMEOUT" bash -c "$command" 2>&1 >> "$artefact_file"
             fi
             exit_status=${PIPESTATUS[0]}
@@ -382,6 +450,7 @@ execute_yaml_section() {
             exit $exit_status
         )
         local exit_status=$?
+        # Handle different exit codes based on the section type
         # For checks phase, treat any exit code as success (command executed)
         # The non-zero exit codes indicate issues found, not execution failure
         if [[ "$section" == "checks" ]]; then
@@ -393,6 +462,7 @@ execute_yaml_section() {
             ((success_count++))
         else
             # For other phases (preflight), treat non-zero as failure
+            # Preflight commands must succeed for the script to continue
             if [[ $exit_status -eq 0 ]]; then
                 echo "✅ $name: SUCCESS"
                 ((success_count++))
@@ -406,9 +476,10 @@ execute_yaml_section() {
     done
     echo ""
     
-    # Re-enable set -e
+    # Re-enable set -e for strict error handling
     set -e
     
+    # Report final results and return appropriate exit code
     # Only exit with failure if any commands failed to execute
     # (not if they ran successfully but found issues)
     if [[ $success_count -lt $total_count ]]; then
@@ -423,27 +494,33 @@ execute_yaml_section() {
 
 
 # Function to execute metrics phase
+# This function runs metrics commands and validates their output against allowed values
+# It creates a metrics.json file with the results and handles graceful degradation
 execute_metrics_phase() {
     set +e
-    local yaml_file="$1"
-    local phase_name="Metrics"
+    local yaml_file="$1"          # Path to YAML configuration file
+    local phase_name="Metrics"     # Phase name for display
     local metrics_dir="$ARTEFACT_DIR/metrics"
-    mkdir -p "$metrics_dir"
-    local results_json="[]"
-    local fail_count=0
-    local total_count=0
+    mkdir -p "$metrics_dir"        # Create metrics subdirectory for artefact files
+    local results_json="[]"        # JSON array to store all metric results
+    local fail_count=0             # Number of metrics that failed validation
+    local total_count=0            # Total number of metrics to process
 
     echo "Running $phase_name phase..."
     echo "=================================="
 
+    # Get the total number of metrics to process
     local metrics_count
     metrics_count=$(yq eval ".metrics | length" "$yaml_file")
     
     # Parse all metrics data once to avoid redundant yq calls
+    # This improves performance by reducing the number of yq invocations
     local metrics_data
     metrics_data=$(yq eval -o=json ".metrics" "$yaml_file")
     
+    # Process each metric in the configuration
     for ((i=0; i<metrics_count; i++)); do
+        # Extract all required fields for this metric
         local name command allowed_values data_type default_value
         name=$(echo "$metrics_data" | jq -r ".[$i].name")
         command=$(echo "$metrics_data" | jq -r ".[$i].command")
@@ -458,10 +535,10 @@ execute_metrics_phase() {
         local artefact_file="$metrics_dir/$name"
         echo "Saving output to: $artefact_file"
         local tmp_output_file
-        tmp_output_file=$(mktemp)
+        tmp_output_file=$(mktemp)  # Temporary file to capture command output
         (
             set +e
-            # Write header to artefact file
+            # Write header to artefact file with metadata
             {
                 echo "# GitCheck Metric Artefact: $name"
                 echo "# Generated: $(date)"
@@ -486,6 +563,7 @@ execute_metrics_phase() {
                 echo "$metric_output" >> "$artefact_file"
             fi
             # Only use first line of output for value comparison
+            # This allows commands to produce multiple lines but only validates the first
             echo "$metric_output" | head -n1 | xargs > "$tmp_output_file"
             exit $metric_status
         )
@@ -497,12 +575,14 @@ execute_metrics_phase() {
             rm -f "$tmp_output_file"
         fi
         # Compare output to allowed_values based on data_type
+        # This determines whether the metric passes validation
         local pass=0
         if [[ $exit_status -eq 0 ]]; then
             if [[ "$data_type" == "number" ]]; then
-                # For numeric values, check ranges
+                # For numeric values, check ranges and exact matches
                 while IFS= read -r allowed_val; do
                     if [[ "$allowed_val" =~ ^([0-9]+(\.[0-9]+)?)-([0-9]+(\.[0-9]+)?)$ ]]; then
+                        # Range format: "min-max" (e.g., "0-100", "1.5-2.5")
                         local range_min="${BASH_REMATCH[1]}"
                         local range_max="${BASH_REMATCH[3]}"
                         # Check if metric_value is within this range (using bc for decimal comparison)
@@ -518,6 +598,7 @@ execute_metrics_phase() {
                 done < <(jq -r '.[]' <<< "$allowed_values")
             else
                 # For string values, use exact set matching
+                # The value must be exactly one of the allowed values
                 if jq -e --arg val "$metric_value" '. | index($val)' <<< "$allowed_values" >/dev/null; then
                     pass=1
                 fi
@@ -528,27 +609,31 @@ execute_metrics_phase() {
                 metric_status_str="pass"
             else
                 echo "❌ $name: FAIL (value: $metric_value, allowed: $allowed_values)"
+                # Use default value when validation fails (graceful degradation)
                 metric_value="$default_value"
                 metric_status_str="default"
                 ((fail_count++))
             fi
         elif [[ $exit_status -eq 124 ]]; then
             echo "⏰ $name: TIMEOUT (exceeded ${TIMEOUT}s)"
+            # Use default value when command times out
             metric_value="$default_value"
             metric_status_str="default"
             ((fail_count++))
         else
             echo "❌ $name: ERROR (command failed, exit code: $exit_status)"
+            # Use default value when command fails
             metric_value="$default_value"
             metric_status_str="default"
             ((fail_count++))
         fi
-        # Save result to results_json
+        # Save result to results_json for final output
         results_json=$(jq -c --arg name "$name" --arg value "$metric_value" --argjson allowed "$allowed_values" --arg status "$metric_status_str" '. += [{name: $name, value: $value, allowed_values: $allowed, status: $status}]' <<< "$results_json")
         echo ""
     done
 
     # Always write metrics.json, even if some metrics fail
+    # This ensures we have a complete record of all metrics attempted
     echo "$results_json" | jq '.' > "$ARTEFACT_DIR/metrics.json"
     echo "Metrics phase completed: $((total_count - fail_count))/$total_count metrics passed"
     echo "Results saved to $ARTEFACT_DIR/metrics.json"
@@ -560,38 +645,53 @@ execute_metrics_phase() {
     fi
 }
 
+# =============================================================================
 # MAIN EXECUTION
+# =============================================================================
+
+# Process command line arguments and set global variables
 process_arguments "$@"
+
+# Validate arguments and resolve commit hash
 validate_arguments
+
+# Show user what configuration will be used
 display_configuration 
 
-# Validate YAML configuration
+# Validate YAML configuration structure and content
 validate_yaml_config "$CONFIG_FILE"
 
-# Ensure artefact folder exists
+# Ensure artefact folder exists for storing command outputs
 ARTEFACT_DIR=".gitcheck"
 mkdir -p "$ARTEFACT_DIR"
 
-# If --only is set, run only that phase
+# Execute phases based on --only flag or run all phases
 if [[ "$ONLY_PHASE" == "validate" ]]; then
+    # Validation-only mode: just validate the configuration
     echo "Configuration validated successfully."
     exit 0
 elif [[ "$ONLY_PHASE" == "preflight" ]]; then
+    # Preflight-only mode: run only preflight commands
     execute_yaml_section "$CONFIG_FILE" "preflight" "Preflight"
     echo "GitCheck completed!"
     exit 0
 elif [[ "$ONLY_PHASE" == "checks" ]]; then
+    # Checks-only mode: run only checks commands
     execute_yaml_section "$CONFIG_FILE" "checks" "Checks"
     echo "GitCheck completed!"
     exit 0
 elif [[ "$ONLY_PHASE" == "metrics" ]]; then
+    # Metrics-only mode: run only metrics commands
     execute_metrics_phase "$CONFIG_FILE"
     echo "GitCheck completed!"
     exit $?
 else
-    # No --only flag: run all phases in order
+    # Full execution mode: run all phases in order
+    # 1. Preflight: Commands that must succeed before proceeding
     execute_yaml_section "$CONFIG_FILE" "preflight" "Preflight"
+    # 2. Checks: Commands that analyze the codebase
     execute_yaml_section "$CONFIG_FILE" "checks" "Checks"
+    # 3. Metrics: Commands that produce measurable values with validation
     execute_metrics_phase "$CONFIG_FILE"
     echo "GitCheck completed!"
     exit $?
