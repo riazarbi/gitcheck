@@ -50,7 +50,15 @@ CONFIG_FILE="gitcheck.yaml"    # Path to YAML configuration file
 COMMIT_HASH=""                 # Git commit hash to evaluate (empty = latest commit)
 ONLY_PHASE=""                  # If set, run only this specific phase
 VERBOSE=false                  # Whether to print command output to terminal
-TIMEOUT=300                    # Timeout in seconds for long-running commands (5 minutes)
+
+# Timeout configuration
+# 300 seconds (5 minutes) is a good default because:
+# - Most commands complete in under 5 minutes
+# - Long enough for commands that use AI assistants, complex builds, tests, and analysis
+# - Short enough to catch hanging processes quickly
+# - Provides good balance between patience and responsiveness
+DEFAULT_TIMEOUT=300            # Default timeout in seconds (5 minutes)
+TIMEOUT=$DEFAULT_TIMEOUT       # Current timeout value (can be overridden by --timeout)
 
 # =============================================================================
 # UTILITY FUNCTIONS
