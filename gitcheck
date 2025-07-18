@@ -24,14 +24,23 @@ fi
 
 # GitCheck - Quality assessment tool for code repositories
 # 
-# This script evaluates code repository quality using a YAML configuration file.
+# WHY: This script helps teams maintain code quality by running automated checks
+# against specific commits. It provides consistent, repeatable quality assessment
+# that can be integrated into CI/CD pipelines or run manually for code reviews.
+#
+# HOW: The script evaluates code repository quality using a YAML configuration file.
 # It runs commands against a specified commit hash (or latest if unspecified),
 # producing artefact files and a metrics.json file stored as a git note.
 #
-# The script operates in three phases:
-# 1. Preflight: Commands that must succeed before proceeding
-# 2. Checks: Commands that analyze the codebase (non-zero exit indicates issues)
-# 3. Metrics: Commands that produce measurable values with validation
+# PHASES: The script operates in three phases for comprehensive quality assessment:
+# 1. Preflight: Commands that must succeed before proceeding (e.g., build, dependencies)
+# 2. Checks: Commands that analyze the codebase (non-zero exit indicates issues found)
+# 3. Metrics: Commands that produce measurable values with validation (e.g., test coverage)
+#
+# OUTPUT: Creates .gitcheck/ directory with:
+# - Individual artefact files for each command's output
+# - metrics.json with validated metric values
+# - Clear success/failure reporting for each phase
 #
 # Usage: gitcheck [config_file] [commit_hash] [options]
 
@@ -117,7 +126,8 @@ process_arguments() {
                 # Set which phase to run (validate, preflight, checks, metrics)
                 ((only_count++))
                 if [[ $only_count -gt 1 ]]; then
-                    echo "Error: Only one --only flag can be specified"
+                    echo "Error: Only one --only flag can be specified. You can run one phase at a time."
+                echo "Valid phases: validate, preflight, checks, metrics"
                     usage
                 fi
                 ONLY_PHASE="${1#--only=}"  # Extract phase name after '='
@@ -133,7 +143,8 @@ process_arguments() {
                 TIMEOUT="${1#--timeout=}"
                 # Validate timeout is a positive integer
                 if ! [[ "$TIMEOUT" =~ ^[0-9]+$ ]] || [[ "$TIMEOUT" -eq 0 ]]; then
-                    echo "Error: Timeout must be a positive integer"
+                    echo "Error: Timeout must be a positive integer (e.g., 300 for 5 minutes)"
+                echo "The timeout prevents hanging commands from blocking your workflow."
                     usage
                 fi
                 shift
@@ -167,7 +178,9 @@ validate_arguments() {
                 # Valid phase - continue
                 ;;
             *)
-                echo "Error: Unknown phase for --only: $ONLY_PHASE"
+                echo "Error: Unknown phase '$ONLY_PHASE' for --only flag"
+                echo "Valid phases: validate, preflight, checks, metrics"
+                echo "Examples: --only=checks, --only=metrics"
                 usage
                 ;;
         esac
@@ -216,6 +229,10 @@ validate_yaml_syntax() {
     
     if ! yq eval '.' "$yaml_file" >/dev/null 2>&1; then
         echo "Error: '$yaml_file' is not a valid YAML file"
+        echo "Check your YAML syntax. Common issues:"
+        echo "  - Missing quotes around strings with special characters"
+        echo "  - Incorrect indentation (use spaces, not tabs)"
+        echo "  - Missing colons after keys"
         exit 1
     fi
 }
@@ -237,10 +254,14 @@ validate_preflight_commands() {
             
             if [[ "$name_exists" == "null" ]] || [[ -z "$name_exists" ]]; then
                 echo "Error: Preflight command $((i+1)) missing 'name' field"
+                echo "Each preflight command must have a 'name' field for identification."
+                echo "Example: { name: 'build', command: 'make build' }"
                 exit 1
             fi
             if [[ "$command_exists" == "null" ]] || [[ -z "$command_exists" ]]; then
                 echo "Error: Preflight command $((i+1)) missing 'command' field"
+                echo "Each preflight command must have a 'command' field to execute."
+                echo "Example: { name: 'build', command: 'make build' }"
                 exit 1
             fi
         done
@@ -318,16 +339,18 @@ validate_metrics_commands() {
                 exit 1
             fi
             # Validate that the default value is within the allowed range/set
-            # This ensures graceful degradation when commands fail
+            # WHY: This ensures graceful degradation when commands fail - the default value
+            # will be used instead of the actual command output, so it must be valid
             local default_valid=0
             if [[ "$data_type" == "number" ]]; then
                 # For numeric values, check if default is in any allowed range or matches an allowed value
+                # This handles both exact values (e.g., "0", "100") and ranges (e.g., "0-100", "1.5-2.5")
                 for allowed_val in $(echo "$allowed_values_json" | jq -r '.[]'); do
                     if [[ "$allowed_val" =~ ^([0-9]+(\.[0-9]+)?)-([0-9]+(\.[0-9]+)?)$ ]]; then
                         # Range format: "min-max" (e.g., "0-100", "1.5-2.5")
                         local range_min="${BASH_REMATCH[1]}"
                         local range_max="${BASH_REMATCH[3]}"
-                        # Use bc for precise decimal comparison
+                        # Use bc for precise decimal comparison (handles floating point correctly)
                         if (( $(echo "$default_value >= $range_min && $default_value <= $range_max" | bc -l) )); then
                             default_valid=1
                             break
@@ -340,12 +363,16 @@ validate_metrics_commands() {
                 done
             else
                 # For string values, must be in the allowed_values set
+                # This ensures the default is one of the acceptable string options
                 if jq -e --arg val "$default_value" '. | index($val)' <<< "$allowed_values_json" >/dev/null; then
                     default_valid=1
                 fi
             fi
             if [[ $default_valid -ne 1 ]]; then
                 echo "Error: Metrics command $((i+1)) has a default value ('$default_value') not in allowed_values."
+                echo "The default value must be one of the allowed values for graceful degradation."
+                echo "Allowed values: $allowed_values_json"
+                echo "Example: If allowed_values is ['pass', 'fail'], default must be 'pass' or 'fail'"
                 exit 1
             fi
         done
@@ -743,19 +770,28 @@ execute_metrics_phase() {
 # MAIN EXECUTION
 # =============================================================================
 
+# WHY: This section orchestrates the entire GitCheck workflow
+# It ensures proper setup, validation, and execution of all phases
+# The order is critical: arguments → validation → execution
+
 # Process command line arguments and set global variables
+# This must happen first to configure the script behavior
 process_arguments "$@"
 
 # Validate arguments and resolve commit hash
+# This ensures we have valid inputs before proceeding
 validate_arguments
 
 # Show user what configuration will be used
+# This helps with debugging and understanding what will happen
 display_configuration 
 
 # Validate YAML configuration structure and content
+# This catches configuration errors early before running any commands
 validate_yaml_config "$CONFIG_FILE"
 
 # Ensure artefact folder exists for storing command outputs
+# This creates the .gitcheck/ directory where all results will be saved
 ARTEFACT_DIR=".gitcheck"
 mkdir -p "$ARTEFACT_DIR"
 
