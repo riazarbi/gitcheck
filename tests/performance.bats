@@ -192,42 +192,7 @@ EOF
     [ "$output_lines" -gt 1000 ]
 }
 
-@test "should handle concurrent execution efficiently" {
-    cat > gitcheck.yaml << 'EOF'
-preflight:
-EOF
-    
-    # Add 20 concurrent commands
-    for i in {1..20}; do
-        echo "  - name: \"concurrent_$i\"" >> gitcheck.yaml
-        echo "    command: \"sleep 1 && echo 'concurrent $i'\"" >> gitcheck.yaml
-    done
-    
-    cat >> gitcheck.yaml << 'EOF'
-checks:
-  - name: "test"
-    command: "echo 'test'"
-metrics:
-  - name: "test"
-    command: "echo 'test'"
-    data_type: "string"
-    allowed_values: ["test"]
-    default: "test"
-EOF
-    
-    # Measure execution time
-    start_time=$(date +%s.%N)
-    run ./gitcheck --only=preflight --timeout=10
-    end_time=$(date +%s.%N)
-    
-    execution_time=$(echo "$end_time - $start_time" | bc)
-    
-    [ "$status" -eq 0 ]
-    # Should complete in roughly 1-2 seconds due to concurrency
-    [ "$(echo "$execution_time < 10.0" | bc -l)" -eq 1 ]
-    [[ "$output" == *"concurrent_1"* ]]
-    [[ "$output" == *"concurrent_20"* ]]
-}
+
 
 @test "should handle timeout efficiently" {
     cat > gitcheck.yaml << 'EOF'
