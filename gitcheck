@@ -429,7 +429,102 @@ extract_command_string() {
     echo "$section_data" | jq -r ".[$index].command"
 }
 
+# Write header information to artefact file
+# This function creates a standardized header with metadata for artefact files
+write_artefact_header() {
+    local artefact_file="$1"    # Path to artefact file
+    local name="$2"             # Name of the command/metric
+    local command="$3"          # Command that was run
+    local allowed_values="$4"   # Allowed values for validation
+    local phase_name="$5"       # Phase name (Preflight/Checks/Metrics)
+    
+    {
+        echo "# GitCheck $phase_name Artefact: $name"
+        echo "# Generated: $(date)"
+        echo "# Command: $command"
+        echo "# Allowed values: $allowed_values"
+        echo "# Phase: $phase_name"
+        echo "# ========================================="
+        echo ""
+    } > "$artefact_file"
+}
 
+
+
+# Run command with timeout and capture output
+# This function handles command execution, timeout detection, and output capture
+run_command_with_timeout() {
+    local command="$1"          # Command to run
+    local timeout_seconds="$2"  # Timeout in seconds
+    local output_file="$3"      # File to append output to
+    local verbose="$4"          # Whether to print to terminal
+    
+    local tmp_output_file
+    tmp_output_file=$(mktemp)  # Temporary file to capture command output
+    
+    # Run the command with timeout, capture output (stdout only, trimmed)
+    local cmd_output
+    cmd_output=$(timeout "$timeout_seconds" bash -c "$command" 2>&1)
+    local exit_status=${PIPESTATUS[0]}
+    
+    # Handle timeout exit code (124)
+    if [[ $exit_status -eq 124 ]]; then
+        echo "TIMEOUT: Command exceeded ${timeout_seconds}s timeout" >> "$output_file"
+        cmd_output="TIMEOUT"
+    fi
+    
+    # Conditionally print to terminal based on verbose flag
+    if [[ "$verbose" == "true" ]]; then
+        echo "$cmd_output" | tee -a "$output_file"
+    else
+        echo "$cmd_output" >> "$output_file"
+    fi
+    
+    # Only use first line of output for value comparison
+    # This allows commands to produce multiple lines but only validates the first
+    echo "$cmd_output" | head -n1 | xargs > "$tmp_output_file"
+    
+    # Return exit status and path to temp file with first line
+    echo "$exit_status:$tmp_output_file"
+}
+
+# Validate metric result against allowed values
+# This function checks if a metric value is valid based on data type and allowed values
+validate_metric_result() {
+    local metric_value="$1"      # The metric value to validate
+    local allowed_values="$2"    # JSON array of allowed values
+    local data_type="$3"         # Data type (number or string)
+    
+    local pass=0
+    
+    if [[ "$data_type" == "number" ]]; then
+        # For numeric values, check ranges and exact matches
+        while IFS= read -r allowed_val; do
+            if [[ "$allowed_val" =~ ^([0-9]+(\.[0-9]+)?)-([0-9]+(\.[0-9]+)?)$ ]]; then
+                # Range format: "min-max" (e.g., "0-100", "1.5-2.5")
+                local range_min="${BASH_REMATCH[1]}"
+                local range_max="${BASH_REMATCH[3]}"
+                # Check if metric_value is within this range (using bc for decimal comparison)
+                if (( $(echo "$metric_value >= $range_min && $metric_value <= $range_max" | bc -l) )); then
+                    pass=1
+                    break
+                fi
+            elif [[ "$allowed_val" == "$metric_value" ]]; then
+                # Exact match for non-range values
+                pass=1
+                break
+            fi
+        done < <(jq -r '.[]' <<< "$allowed_values")
+    else
+        # For string values, use exact set matching
+        # The value must be exactly one of the allowed values
+        if jq -e --arg val "$metric_value" '. | index($val)' <<< "$allowed_values" >/dev/null; then
+            pass=1
+        fi
+    fi
+    
+    echo $pass
+}
 
 # Function to execute commands from a YAML section (preflight or checks)
 # This function runs all commands in a section and handles their output
@@ -477,14 +572,7 @@ execute_yaml_section() {
         (
             set +e
             # Write header to artefact file with metadata
-            {
-                echo "# GitCheck Artefact: $name"
-                echo "# Generated: $(date)"
-                echo "# Command: $command"
-                echo "# Phase: $phase_name"
-                echo "# ========================================="
-                echo ""
-            } > "$artefact_file"
+            write_artefact_header "$artefact_file" "$name" "$command" "" "$phase_name"
             # Run the command with timeout, conditionally printing to terminal based on verbose flag
             if [[ "$VERBOSE" == "true" ]]; then
                 # Verbose mode: show output in terminal and save to file
@@ -586,75 +674,27 @@ execute_metrics_phase() {
         fi
         local artefact_file="$metrics_dir/$name"
         echo "Saving output to: $artefact_file"
-        local tmp_output_file
-        tmp_output_file=$(mktemp)  # Temporary file to capture command output
-        (
-            set +e
-            # Write header to artefact file with metadata
-            {
-                echo "# GitCheck Metric Artefact: $name"
-                echo "# Generated: $(date)"
-                echo "# Command: $command"
-                echo "# Allowed values: $allowed_values"
-                echo "# Phase: $phase_name"
-                echo "# ========================================="
-                echo ""
-            } > "$artefact_file"
-            # Run the command with timeout, capture output (stdout only, trimmed)
-            metric_output=$(timeout "$TIMEOUT" bash -c "$command" 2>&1)
-            metric_status=${PIPESTATUS[0]}
-            # Handle timeout exit code (124)
-            if [[ $metric_status -eq 124 ]]; then
-                echo "TIMEOUT: Command exceeded ${TIMEOUT}s timeout" >> "$artefact_file"
-                metric_output="TIMEOUT"
-            fi
-            # Conditionally print to terminal based on verbose flag
-            if [[ "$VERBOSE" == "true" ]]; then
-                echo "$metric_output" | tee -a "$artefact_file"
-            else
-                echo "$metric_output" >> "$artefact_file"
-            fi
-            # Only use first line of output for value comparison
-            # This allows commands to produce multiple lines but only validates the first
-            echo "$metric_output" | head -n1 | xargs > "$tmp_output_file"
-            exit $metric_status
-        )
-        local exit_status=$?
+        
+        # Write header to artefact file with metadata
+        write_artefact_header "$artefact_file" "$name" "$command" "$allowed_values" "$phase_name"
+        
+        # Run the command with timeout and capture output
+        local result
+        result=$(run_command_with_timeout "$command" "$TIMEOUT" "$artefact_file" "$VERBOSE")
+        local exit_status="${result%:*}"
+        local tmp_output_file="${result#*:}"
+        
         local metric_value=""
         local metric_status_str="fail"
         if [[ -f "$tmp_output_file" ]]; then
             metric_value=$(cat "$tmp_output_file")
             rm -f "$tmp_output_file"
         fi
-        # Compare output to allowed_values based on data_type
-        # This determines whether the metric passes validation
+        
+        # Validate metric result
         local pass=0
         if [[ $exit_status -eq 0 ]]; then
-            if [[ "$data_type" == "number" ]]; then
-                # For numeric values, check ranges and exact matches
-                while IFS= read -r allowed_val; do
-                    if [[ "$allowed_val" =~ ^([0-9]+(\.[0-9]+)?)-([0-9]+(\.[0-9]+)?)$ ]]; then
-                        # Range format: "min-max" (e.g., "0-100", "1.5-2.5")
-                        local range_min="${BASH_REMATCH[1]}"
-                        local range_max="${BASH_REMATCH[3]}"
-                        # Check if metric_value is within this range (using bc for decimal comparison)
-                        if (( $(echo "$metric_value >= $range_min && $metric_value <= $range_max" | bc -l) )); then
-                            pass=1
-                            break
-                        fi
-                    elif [[ "$allowed_val" == "$metric_value" ]]; then
-                        # Exact match for non-range values
-                        pass=1
-                        break
-                    fi
-                done < <(jq -r '.[]' <<< "$allowed_values")
-            else
-                # For string values, use exact set matching
-                # The value must be exactly one of the allowed values
-                if jq -e --arg val "$metric_value" '. | index($val)' <<< "$allowed_values" >/dev/null; then
-                    pass=1
-                fi
-            fi
+            pass=$(validate_metric_result "$metric_value" "$allowed_values" "$data_type")
             
             if [[ $pass -eq 1 ]]; then
                 echo "✅ $name: PASS (value: $metric_value)"
@@ -696,6 +736,8 @@ execute_metrics_phase() {
         return 0
     fi
 }
+
+
 
 # =============================================================================
 # MAIN EXECUTION
