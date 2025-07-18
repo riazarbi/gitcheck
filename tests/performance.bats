@@ -155,8 +155,8 @@ EOF
     [ "$(echo "$execution_time < 30.0" | bc -l)" -eq 1 ]  # Should complete within 30 seconds
     
     # Check that the large output was captured
-    [ -f ".gitcheck/large_output" ]
-    run wc -l .gitcheck/large_output
+    [ -f ".gitcheck/preflight/large_output" ]
+    run wc -l .gitcheck/preflight/large_output
     output_lines=$(echo "$output" | awk '{print $1}')
     [ "$output_lines" -gt 10000 ]  # Should have captured the large output
 }
@@ -186,8 +186,8 @@ EOF
     [ "$status" -eq 0 ]
     
     # Check that the output was captured without memory issues
-    [ -f ".gitcheck/memory_test" ]
-    run wc -l .gitcheck/memory_test
+    [ -f ".gitcheck/preflight/memory_test" ]
+    run wc -l .gitcheck/preflight/memory_test
     output_lines=$(echo "$output" | awk '{print $1}')
     [ "$output_lines" -gt 1000 ]
 }

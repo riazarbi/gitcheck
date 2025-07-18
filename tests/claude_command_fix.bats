@@ -73,10 +73,10 @@ teardown() {
     [ "$status" -eq 0 ]
     
     # Check that all artefact files were created
-    [ -f ".gitcheck/simple_check" ]
-    [ -f ".gitcheck/claude_check1" ]
-    [ -f ".gitcheck/claude_check2" ]
-    [ -f ".gitcheck/final_check" ]
+    [ -f ".gitcheck/checks/simple_check" ]
+    [ -f ".gitcheck/checks/claude_check1" ]
+    [ -f ".gitcheck/checks/claude_check2" ]
+    [ -f ".gitcheck/checks/final_check" ]
 }
 
 @test "should handle multiple Claude commands in sequence" {

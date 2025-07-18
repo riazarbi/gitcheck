@@ -84,10 +84,10 @@ EOF
     [[ "$output" == *"Checks phase completed:"* ]]
     
     # Check that artefact files were created
-    [ -f ".gitcheck/simple_check" ]
-    [ -f ".gitcheck/multiline_check" ]
-    [ -f ".gitcheck/failing_check" ]
-    [ -f ".gitcheck/successful_check" ]
+    [ -f ".gitcheck/checks/simple_check" ]
+    [ -f ".gitcheck/checks/multiline_check" ]
+    [ -f ".gitcheck/checks/failing_check" ]
+    [ -f ".gitcheck/checks/successful_check" ]
 }
 
 @test "should include proper headers in artefact files" {
@@ -96,7 +96,7 @@ EOF
     [ "$status" -eq 0 ]
     
     # Check artefact file header
-    run cat .gitcheck/test_check
+    run cat .gitcheck/checks/test_check
     [ "$status" -eq 0 ]
     [[ "$output" == *"# GitCheck Artefact: test_check"* ]]
     [[ "$output" == *"# Generated:"* ]]
@@ -111,7 +111,7 @@ EOF
     [ "$status" -eq 0 ]  # All checks executed successfully
     
     # Check that multi-line command output is captured
-    run cat .gitcheck/multiline_check
+    run cat .gitcheck/checks/multiline_check
     [ "$status" -eq 0 ]
     [[ "$output" == *"line 1"* ]]
     [[ "$output" == *"line 2"* ]]
@@ -130,7 +130,7 @@ EOF
     [[ "$output" == *"✅ successful_check: EXECUTED"* ]]
     
     # All artefact files should exist, even for commands with non-zero exit codes
-    [ -f ".gitcheck/failing_check" ]
+    [ -f ".gitcheck/checks/failing_check" ]
 }
 
 @test "should capture both stdout and stderr in artefact files" {
@@ -153,7 +153,7 @@ EOF
     [ "$status" -eq 0 ]
     
     # Check that both stdout and stderr are captured
-    run cat .gitcheck/stdout_stderr_test
+    run cat .gitcheck/checks/stdout_stderr_test
     [ "$status" -eq 0 ]
     [[ "$output" == *"stdout message"* ]]
     [[ "$output" == *"stderr message"* ]]
@@ -203,7 +203,7 @@ EOF
     [ "$status" -eq 0 ]
     
     # Check that complex command output is captured correctly
-    run cat .gitcheck/complex_command
+    run cat .gitcheck/checks/complex_command
     [ "$status" -eq 0 ]
     [[ "$output" == *"test with spaces"* ]]
     [[ "$output" == *"test with \"quotes\""* ]]
@@ -228,21 +228,21 @@ EOF
     
     # Directory should be created
     [ -d ".gitcheck" ]
-    [ -f ".gitcheck/test_check" ]
+    [ -f ".gitcheck/checks/test_check" ]
 }
 
 @test "should overwrite existing artefact files" {
     create_valid_yaml
     
     # Create an existing artefact file
-    mkdir -p .gitcheck
-    echo "old content" > .gitcheck/test_check
+    mkdir -p .gitcheck/checks
+    echo "old content" > .gitcheck/checks/test_check
     
     run ./gitcheck --only=checks
     [ "$status" -eq 0 ]
     
     # File should be overwritten with new content
-    run cat .gitcheck/test_check
+    run cat .gitcheck/checks/test_check
     [ "$status" -eq 0 ]
     [[ "$output" != *"old content"* ]]
     [[ "$output" == *"check test"* ]]
@@ -270,11 +270,11 @@ EOF
     [ "$status" -eq 0 ]
     
     # Artefact files should exist even for commands with no output
-    [ -f ".gitcheck/no_output" ]
-    [ -f ".gitcheck/empty_output" ]
+    [ -f ".gitcheck/checks/no_output" ]
+    [ -f ".gitcheck/checks/empty_output" ]
     
     # Files should contain headers even if no command output
-    run cat .gitcheck/no_output
+    run cat .gitcheck/checks/no_output
     [ "$status" -eq 0 ]
     [[ "$output" == *"# GitCheck Artefact: no_output"* ]]
     [[ "$output" == *"# Command: true"* ]]

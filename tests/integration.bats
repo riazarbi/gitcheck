@@ -59,11 +59,11 @@ EOF
     [[ "$output" == *"Metrics phase completed"* ]]
     
     # Check that all artefact files were created
-    [ -f ".gitcheck/check_git_status" ]
-    [ -f ".gitcheck/check_branch" ]
-    [ -f ".gitcheck/file_count" ]
-    [ -f ".gitcheck/has_readme" ]
-    [ -f ".gitcheck/check_file_size" ]
+    [ -f ".gitcheck/preflight/check_git_status" ]
+    [ -f ".gitcheck/preflight/check_branch" ]
+    [ -f ".gitcheck/checks/file_count" ]
+    [ -f ".gitcheck/checks/has_readme" ]
+    [ -f ".gitcheck/checks/check_file_size" ]
     [ -f ".gitcheck/metrics/code_lines" ]
     [ -f ".gitcheck/metrics/repo_size" ]
     [ -f ".gitcheck/metrics.json" ]
@@ -284,8 +284,8 @@ EOF
     [[ "$output" == *"output_size"* ]]
     
     # Check that the large output was captured
-    [ -f ".gitcheck/large_output_test" ]
-    run wc -l .gitcheck/large_output_test
+    [ -f ".gitcheck/preflight/large_output_test" ]
+    run wc -l .gitcheck/preflight/large_output_test
     output_lines=$(echo "$output" | awk '{print $1}')
     [ "$output_lines" -gt 1000 ]  # Should have captured the large output
 }

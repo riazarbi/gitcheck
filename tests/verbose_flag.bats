@@ -116,15 +116,15 @@ teardown() {
     # Test without verbose
     run ./gitcheck --only=checks
     [ "$status" -eq 0 ]
-    [ -f ".gitcheck/test_check" ]
+    [ -f ".gitcheck/checks/test_check" ]
     
     # Test with verbose
     run ./gitcheck --only=checks --verbose
     [ "$status" -eq 0 ]
-    [ -f ".gitcheck/test_check" ]
+    [ -f ".gitcheck/checks/test_check" ]
     
     # Both should have the same content in artefact file
-    run cat .gitcheck/test_check
+    run cat .gitcheck/checks/test_check
     [ "$status" -eq 0 ]
     [[ "$output" == *"check output"* ]]
 }
@@ -275,5 +275,5 @@ EOF
     [[ "$output" == *"Running: test_check"* ]]
     [[ "$output" == *"✅ test_check: EXECUTED"* ]]
     # Should show an empty line after the command runs
-    [[ "$output" =~ "Saving output to: .gitcheck/test_check"$'\n'$'\n' ]]
+    [[ "$output" =~ "Saving output to: .gitcheck/checks/test_check"$'\n'$'\n' ]]
 } 

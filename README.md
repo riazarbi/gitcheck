@@ -123,8 +123,10 @@ Gitcheck outputs all artefacts to the `.gitcheck/` folder. Each artefact file na
 
 ```
 .gitcheck/
-├── preflight_command_name    # Preflight command outputs
-├── checks_command_name       # Checks command outputs
+├── preflight/
+│   └── command_name         # Preflight command outputs
+├── checks/
+│   └── command_name         # Checks command outputs
 ├── metrics/
 │   └── metric_name          # Metrics command outputs
 └── metrics.json             # Summary of all metrics

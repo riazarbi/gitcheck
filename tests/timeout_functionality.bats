@@ -136,7 +136,7 @@ EOF
     [ "$status" -eq 0 ]
     
     # Check that timeout message is written to artefact file
-    run cat .gitcheck/slow_check
+    run cat .gitcheck/checks/slow_check
     [ "$status" -eq 0 ]
     [[ "$output" == *"TIMEOUT: Command exceeded 2s timeout"* ]]
 }

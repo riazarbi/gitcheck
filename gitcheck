@@ -38,7 +38,7 @@ fi
 # 3. Metrics: Commands that produce measurable values with validation (e.g., test coverage)
 #
 # OUTPUT: Creates .gitcheck/ directory with:
-# - Individual artefact files for each command's output
+# - Individual artefact files organized by phase (preflight/, checks/, metrics/)
 # - metrics.json with validated metric values
 # - Clear success/failure reporting for each phase
 #
@@ -594,7 +594,9 @@ execute_yaml_section() {
         if [[ "$VERBOSE" == "true" ]]; then
             echo "Command: $command"
         fi
-        local artefact_file="$ARTEFACT_DIR/$name"
+        local phase_dir="$ARTEFACT_DIR/$section"
+        mkdir -p "$phase_dir"        # Create phase subdirectory for artefact files
+        local artefact_file="$phase_dir/$name"
         echo "Saving output to: $artefact_file"
         (
             set +e
