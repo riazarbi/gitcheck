@@ -74,26 +74,51 @@ Create helper functions:
 
 ## Grug's Refactor Strategy
 
-### Phase 1: Extract Helper Functions
-1. Create `extract_command_name()` and `extract_command_string()`
-2. Create `write_artefact_file()` function
-3. Create `capture_command_output()` function
+**Grug will address each problem noninteractively, then stop for conversation about what was done.**
 
-### Phase 2: Break Validation Logic
-1. Extract `validate_yaml_syntax()` 
-2. Extract `validate_preflight()`
-3. Extract `validate_checks()`
-4. Extract `validate_metrics()`
+### Problem 1: Repetitive Code Pattern
+**Grug will:**
+1. Create `extract_command_name()` helper function
+2. Create `extract_command_string()` helper function  
+3. Replace repetitive jq calls with helper functions
+4. Test that behavior unchanged
+5. **STOP for conversation**
 
-### Phase 3: Break Execution Functions
-1. Extract `execute_single_command()`
-2. Extract `handle_command_timeout()`
-3. Extract `validate_metric_result()`
+### Problem 2: Magic Numbers
+**Grug will:**
+1. Add comment explaining why TIMEOUT=300 (5 minutes reasonable)
+2. Add constants for common timeout values
+3. Consider making configurable in future
+4. Test that behavior unchanged
+5. **STOP for conversation**
 
-### Phase 4: Improve Documentation
-1. Add business logic comments
-2. Improve error messages
-3. Add constants for magic numbers
+### Problem 3: Long Validation Function
+**Grug will:**
+1. Extract `validate_yaml_syntax()` function
+2. Extract `validate_preflight()` function
+3. Extract `validate_checks()` function
+4. Extract `validate_metrics()` function
+5. Refactor main validation to use smaller functions
+6. Test that behavior unchanged
+7. **STOP for conversation**
+
+### Problem 4: Long Execution Functions
+**Grug will:**
+1. Extract `execute_single_command()` function
+2. Extract `write_artefact_file()` function
+3. Extract `capture_command_output()` function
+4. Extract `handle_command_timeout()` function
+5. Refactor execution functions to use helpers
+6. Test that behavior unchanged
+7. **STOP for conversation**
+
+### Problem 5: Better Documentation
+**Grug will:**
+1. Add business logic comments explaining WHY
+2. Improve error messages for users
+3. Add examples in complex sections
+4. Test that behavior unchanged
+5. **STOP for conversation**
 
 ## Grug's Success Criteria
 
