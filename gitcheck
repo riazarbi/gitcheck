@@ -377,6 +377,22 @@ validate_yaml_config() {
 # YAML PARSING AND EXECUTION
 # =============================================================================
 
+# Helper function to extract command name from JSON section data
+# This eliminates repetitive jq calls throughout the script
+extract_command_name() {
+    local section_data="$1"
+    local index="$2"
+    echo "$section_data" | jq -r ".[$index].name"
+}
+
+# Helper function to extract command string from JSON section data
+# This eliminates repetitive jq calls throughout the script
+extract_command_string() {
+    local section_data="$1"
+    local index="$2"
+    echo "$section_data" | jq -r ".[$index].command"
+}
+
 
 
 # Function to execute commands from a YAML section (preflight or checks)
@@ -410,10 +426,10 @@ execute_yaml_section() {
     
     # Execute each command in the section
     for ((i=0; i<command_count; i++)); do
-        # Extract command name and command string from the parsed data
+        # Extract command name and command string using helper functions
         local name command
-        name=$(echo "$section_data" | jq -r ".[$i].name")
-        command=$(echo "$section_data" | jq -r ".[$i].command")
+        name=$(extract_command_name "$section_data" "$i")
+        command=$(extract_command_string "$section_data" "$i")
         
         ((total_count++))
         echo "Running: $name"
@@ -520,10 +536,10 @@ execute_metrics_phase() {
     
     # Process each metric in the configuration
     for ((i=0; i<metrics_count; i++)); do
-        # Extract all required fields for this metric
+        # Extract all required fields for this metric using helper functions
         local name command allowed_values data_type default_value
-        name=$(echo "$metrics_data" | jq -r ".[$i].name")
-        command=$(echo "$metrics_data" | jq -r ".[$i].command")
+        name=$(extract_command_name "$metrics_data" "$i")
+        command=$(extract_command_string "$metrics_data" "$i")
         allowed_values=$(echo "$metrics_data" | jq -c ".[$i].allowed_values")
         data_type=$(echo "$metrics_data" | jq -r ".[$i].data_type")
         default_value=$(echo "$metrics_data" | jq -r ".[$i].default")
