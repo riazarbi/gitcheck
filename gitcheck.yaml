@@ -26,22 +26,31 @@ preflight:
 # - Generate any other quality metrics
 checks:
   - name: "lint"
-    command: "shellcheck gitcheck --shell=bash --severity=style"
+    command: 'shellcheck gitcheck --shell=bash --severity=style'
   
   - name: "tests"
-    command: "bats tests/"
+    command: 'bats tests/'
   
   - name: "security"
-    command: "shellcheck gitcheck --severity=warning"
+    command: 'shellcheck gitcheck --severity=warning'
   
-  - name: "readme_assessment"
-    command: "claude --dangerously-skip-permissions -p \"$(cat .gitcheck/prompts/readme_assessment_prompt.md)\""
+  - name: "error_handling_check"
+    command: 'grep -n "set -e" gitcheck || echo "No strict error handling found"'
+  
+  - name: "eval_usage_check"
+    command: 'grep -n "eval" gitcheck || echo "No eval usage found (good)"'
+  
+  - name: "exec_usage_check"
+    command: 'grep -n "exec" gitcheck || echo "No exec usage found"'
+
+  - name: "portability_check"
+    command: 'grep -n -E "(^[[:space:]]*#!.*/|/usr/bin|/bin/|/opt/|/var/|/etc/|/home/|/tmp/|/dev/|/proc/|/sys/)" gitcheck | head -5 || echo "No hardcoded paths found"'
 
   - name: "coverage"
-    command: "claude --dangerously-skip-permissions -p \"$(cat .gitcheck/prompts/coverage_prompt.md)\""
+    command: 'claude --dangerously-skip-permissions -p "$(cat .gitcheck/prompts/coverage_prompt.md)"'
 
-  - name: "dummy"
-    command: "echo yes"
+  - name: "comprehensive_assessment"
+    command: 'claude --dangerously-skip-permissions -p "$(cat .gitcheck/prompts/comprehensive_assessment_prompt.md)"'
 
 
 # Metrics commands that generate structured data for analysis
@@ -52,57 +61,74 @@ checks:
 # - Generate performance benchmarks
 # - Create any other quantifiable metrics
 metrics:
-  - name: "code_complexity"
-    command: "echo '5'"
-    data_type: "number"
-    allowed_values: ["1-10"]
-    default: "1"
-  
+  - name: "build_status"
+    command: 'echo "success"'
+    data_type: "string"
+    allowed_values: ["success", "warning", "failure"]
+    default: "failure"
+
   - name: "test_coverage"
-    command: "echo '85'"
+    command: 'echo "85"'
     data_type: "number"
     allowed_values: ["0-100"]
     default: "0"
-  
+
+  - name: "code_complexity"
+    command: 'echo "5"'
+    data_type: "number"
+    allowed_values: ["1-10"]
+    default: "1"
+
   - name: "lines_of_code"
     command: "wc -l gitcheck | awk '{print $1}'"
     data_type: "number"
     allowed_values: ["0-100", "101-500", "501-1000", "1001+"]
     default: "0"
-  
-  - name: "code_quality_score"
-    command: "echo '1.5'"
-    data_type: "number"
-    allowed_values: ["0-1"]
-    default: "0"
-  
-  - name: "build_status"
-    command: "echo 'success'"
-    data_type: "string"
-    allowed_values: ["success", "warning", "failure"]
-    default: "failure"
-  
-  # Documentation Quality Metrics
+
   - name: "has_project_purpose"
-    command: "head -10 README.md | grep -q '^## Purpose$' && echo 'true' || echo 'false'"
+    command: 'head -10 README.md | grep -q "^## Purpose$" && echo true || echo false'
     data_type: "string"
     allowed_values: ["true", "false"]
     default: "false"
-    
+
   - name: "has_quick_start"
-    command: "grep -q '^## Quick Start$' README.md && echo 'true' || echo 'false'"
+    command: 'grep -q "^## Quick Start$" README.md && echo true || echo false'
     data_type: "string"
     allowed_values: ["true", "false"]
     default: "false"
-  
+
   - name: "quick_start_works"
-    command: "head -1 .gitcheck/readme_assessment"
+    command: 'head -1 .gitcheck/comprehensive_assessment'
     data_type: "string"
     allowed_values: ["NONE", "NOT_WORKING", "WORKING"]
     default: "NONE"
-    
+
   - name: "functionality_purpose_alignment"
-    command: "head -2 .gitcheck/readme_assessment | tail -1"
+    command: 'head -2 .gitcheck/comprehensive_assessment | tail -1'
     data_type: "string"
     allowed_values: ["PERFECT", "STRONG", "GOOD", "MODERATE", "WEAK", "POOR", "NONE"]
     default: "NONE"
+
+  - name: "error_handling_score"
+    command: 'grep -c "set -e" gitcheck'
+    data_type: "number"
+    allowed_values: ["0", "1"]
+    default: "0"
+
+  - name: "dangerous_commands"
+    command: 'grep -c "eval\|exec" gitcheck'
+    data_type: "number"
+    allowed_values: ["0", "1", "2+"]
+    default: "0"
+
+  - name: "portability_score"
+    command: 'grep -c -E "(^[[:space:]]*#!.*/|/usr/bin|/bin/|/opt/|/var/|/etc/|/home/|/tmp/|/dev/|/proc/|/sys/)" gitcheck'
+    data_type: "number"
+    allowed_values: ["0", "1-3", "4-10", "11+"]
+    default: "0"
+
+  - name: "code_review_score"
+    command: 'head -3 .gitcheck/comprehensive_assessment | tail -1'
+    data_type: "string"
+    allowed_values: ["EXCELLENT", "GOOD", "FAIR", "POOR", "BAD"]
+    default: "FAIR"
