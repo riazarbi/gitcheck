@@ -1,134 +1,107 @@
-# Sample GitCheck configuration
-# This file defines the quality assessment pipeline for a shell script repository
+# Simple GitCheck configuration - Taskfile-like format
+# This eliminates complex quote escaping and makes generation simple
 
-# Preflight commands run before quality checks to set up the environment
-# Add commands here to:
-# - Check if required tools are installed
-# - Set up virtual environments
-# - Install dependencies
-# - Configure the testing environment
 preflight:
-  - name: "shellcheck"
-    command: "which shellcheck || (echo 'ShellCheck not found. Install with: brew install shellcheck' && exit 1)"
+  shellcheck:
+    cmd: which shellcheck || (echo 'ShellCheck not found. Install with brew install shellcheck' && exit 1)
   
-  - name: "bats"
-    command: "which bats || (echo 'BATS not found. Install with `brew install bats-core`' && exit 1)"
+  bats:
+    cmd: which bats || (echo 'BATS not found. Install with brew install bats-core' && exit 1)
   
-  - name: "claude"
-    command: "which claude || (echo 'claude not found. Install from https://claude.ai/download' && exit 1)"
+  claude:
+    cmd: which claude || (echo 'claude not found. Install from https://claude.ai/download' && exit 1)
 
-# Quality assessment commands that generate artefact files
-# Add commands here to:
-# - Run linters and static analysis tools
-# - Execute tests and generate coverage reports
-# - Perform security scans
-# - Calculate code complexity metrics
-# - Generate any other quality metrics
 checks:
-  - name: "lint"
-    command: 'shellcheck gitcheck --shell=bash --severity=style'
+  lint:
+    cmd: shellcheck gitcheck --shell=bash --severity=style
   
-  - name: "tests"
-    command: 'bats tests/'
+  tests:
+    cmd: bats tests/
   
-  - name: "security"
-    command: 'shellcheck gitcheck --severity=warning'
+  security:
+    cmd: shellcheck gitcheck --severity=warning
   
-  - name: "error_handling_check"
-    command: 'grep -n "set -e" gitcheck || echo "No strict error handling found"'
+  error_handling_check:
+    cmd: grep -n "set -e" gitcheck || echo "No strict error handling found"
   
-  - name: "eval_usage_check"
-    command: 'grep -n "eval" gitcheck || echo "No eval usage found (good)"'
+  eval_usage_check:
+    cmd: grep -n "eval" gitcheck || echo "No eval usage found (good)"
   
-  - name: "exec_usage_check"
-    command: 'grep -n "exec" gitcheck || echo "No exec usage found"'
+  exec_usage_check:
+    cmd: grep -n "exec" gitcheck || echo "No exec usage found"
 
-  - name: "portability_check"
-    command: 'grep -n -E "(^[[:space:]]*#!.*/|/usr/bin|/bin/|/opt/|/var/|/etc/|/home/|/tmp/|/dev/|/proc/|/sys/)" gitcheck | head -5 || echo "No hardcoded paths found"'
+  portability_check:
+    cmd: grep -n -E "(^[[:space:]]*#!.*/|/usr/bin|/bin/|/opt/|/var/|/etc/|/home/|/tmp/|/dev/|/proc/|/sys/)" gitcheck | head -5 || echo "No hardcoded paths found"
 
-  - name: "coverage"
-    command: 'claude --dangerously-skip-permissions -p "$(cat .gitcheck/prompts/coverage_prompt.md)"'
-
-  - name: "comprehensive_assessment"
-    command: 'claude --dangerously-skip-permissions -p "$(cat .gitcheck/prompts/comprehensive_assessment_prompt.md)"'
-
-
-# Metrics commands that generate structured data for analysis
-# Add commands here to:
-# - Calculate code complexity metrics
-# - Measure test coverage percentages
-# - Count lines of code by type
-# - Generate performance benchmarks
-# - Create any other quantifiable metrics
 metrics:
-  - name: "build_status"
-    command: 'echo "success"'
-    data_type: "string"
+  build_status:
+    cmd: echo "success"
+    data_type: string
     allowed_values: ["success", "warning", "failure"]
     default: "failure"
 
-  - name: "test_coverage"
-    command: 'echo "85"'
-    data_type: "number"
+  test_coverage:
+    cmd: echo "85"
+    data_type: number
     allowed_values: ["0-100"]
     default: "0"
 
-  - name: "code_complexity"
-    command: 'echo "5"'
-    data_type: "number"
+  code_complexity:
+    cmd: echo "5"
+    data_type: number
     allowed_values: ["1-10"]
     default: "1"
 
-  - name: "lines_of_code"
-    command: "wc -l gitcheck | awk '{print $1}'"
-    data_type: "number"
+  lines_of_code:
+    cmd: wc -l gitcheck | awk '{print $1}'
+    data_type: number
     allowed_values: ["0-100", "101-500", "501-1000", "1001+"]
     default: "0"
 
-  - name: "has_project_purpose"
-    command: 'head -10 README.md | grep -q "^## Purpose$" && echo true || echo false'
-    data_type: "string"
+  has_project_purpose:
+    cmd: head -10 README.md | grep -q "^## Purpose$" && echo true || echo false
+    data_type: string
     allowed_values: ["true", "false"]
     default: "false"
 
-  - name: "has_quick_start"
-    command: 'grep -q "^## Quick Start$" README.md && echo true || echo false'
-    data_type: "string"
+  has_quick_start:
+    cmd: grep -q "^## Quick Start$" README.md && echo true || echo false
+    data_type: string
     allowed_values: ["true", "false"]
     default: "false"
 
-  - name: "quick_start_works"
-    command: 'head -1 .gitcheck/comprehensive_assessment'
-    data_type: "string"
+  quick_start_works:
+    cmd: head -1 .gitcheck/comprehensive_assessment
+    data_type: string
     allowed_values: ["NONE", "NOT_WORKING", "WORKING"]
     default: "NONE"
 
-  - name: "functionality_purpose_alignment"
-    command: 'head -2 .gitcheck/comprehensive_assessment | tail -1'
-    data_type: "string"
+  functionality_purpose_alignment:
+    cmd: head -2 .gitcheck/comprehensive_assessment | tail -1
+    data_type: string
     allowed_values: ["PERFECT", "STRONG", "GOOD", "MODERATE", "WEAK", "POOR", "NONE"]
     default: "NONE"
 
-  - name: "error_handling_score"
-    command: 'grep -c "set -e" gitcheck'
-    data_type: "number"
+  error_handling_score:
+    cmd: grep -c "set -e" gitcheck
+    data_type: number
     allowed_values: ["0", "1"]
     default: "0"
 
-  - name: "dangerous_commands"
-    command: 'grep -c "eval\|exec" gitcheck'
-    data_type: "number"
+  dangerous_commands:
+    cmd: grep -c "eval\\|exec" gitcheck
+    data_type: number
     allowed_values: ["0", "1", "2+"]
     default: "0"
 
-  - name: "portability_score"
-    command: 'grep -c -E "(^[[:space:]]*#!.*/|/usr/bin|/bin/|/opt/|/var/|/etc/|/home/|/tmp/|/dev/|/proc/|/sys/)" gitcheck'
-    data_type: "number"
+  portability_score:
+    cmd: grep -c -E "(^[[:space:]]*#!.*/|/usr/bin|/bin/|/opt/|/var/|/etc/|/home/|/tmp/|/dev/|/proc/|/sys/)" gitcheck
+    data_type: number
     allowed_values: ["0", "1-3", "4-10", "11+"]
     default: "0"
 
-  - name: "code_review_score"
-    command: 'head -3 .gitcheck/comprehensive_assessment | tail -1'
-    data_type: "string"
+  code_review_score:
+    cmd: head -3 .gitcheck/comprehensive_assessment | tail -1
+    data_type: string
     allowed_values: ["EXCELLENT", "GOOD", "FAIR", "POOR", "BAD"]
     default: "FAIR"
