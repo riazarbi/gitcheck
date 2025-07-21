@@ -30,15 +30,15 @@ create_valid_yaml() {
     local filename="${1:-gitcheck.yaml}"
     cat > "$filename" << 'EOF'
 preflight:
-  - name: "test_preflight"
-    command: "echo 'preflight test'"
+  test_preflight:
+    cmd: echo 'preflight test'
 checks:
-  - name: "test_check"
-    command: "echo 'check test'"
+  test_check:
+    cmd: echo 'check test'
 metrics:
-  - name: "test_metric"
-    command: "echo 'metric test'"
-    data_type: "string"
+  test_metric:
+    cmd: echo 'metric test'
+    data_type: string
     allowed_values: ["test"]
     default: "test"
 EOF
@@ -49,24 +49,24 @@ create_multiline_yaml() {
     local filename="${1:-gitcheck.yaml}"
     cat > "$filename" << 'EOF'
 preflight:
-  - name: "test_preflight"
-    command: "echo 'preflight test'"
+  test_preflight:
+    cmd: echo 'preflight test'
 checks:
-  - name: "simple_check"
-    command: "echo 'simple check'"
-  - name: "multiline_check"
-    command: |
+  simple_check:
+    cmd: echo 'simple check'
+  multiline_check:
+    cmd: |
       echo 'line 1'
       echo 'line 2'
       echo 'line 3'
-  - name: "failing_check"
-    command: "exit 1"
-  - name: "successful_check"
-    command: "echo 'success'"
+  failing_check:
+    cmd: exit 1
+  successful_check:
+    cmd: echo 'success'
 metrics:
-  - name: "test_metric"
-    command: "echo 'metric test'"
-    data_type: "string"
+  test_metric:
+    cmd: echo 'metric test'
+    data_type: string
     allowed_values: ["test"]
     default: "test"
 EOF
@@ -136,15 +136,15 @@ EOF
 @test "should capture both stdout and stderr in artefact files" {
     cat > gitcheck.yaml << 'EOF'
 preflight:
-  - name: "test_preflight"
-    command: "echo 'preflight test'"
+  test_preflight:
+    cmd: echo 'preflight test'
 checks:
-  - name: "stdout_stderr_test"
-    command: "echo 'stdout message' && echo 'stderr message' >&2"
+  stdout_stderr_test:
+    cmd: echo 'stdout message' && echo 'stderr message' >&2
 metrics:
-  - name: "test_metric"
-    command: "echo 'metric test'"
-    data_type: "string"
+  test_metric:
+    cmd: echo 'metric test'
+    data_type: string
     allowed_values: ["test"]
     default: "test"
 EOF
@@ -162,13 +162,13 @@ EOF
 @test "should handle empty checks section gracefully" {
     cat > gitcheck.yaml << 'EOF'
 preflight:
-  - name: "test_preflight"
-    command: "echo 'preflight test'"
-checks: []
+  test_preflight:
+    cmd: echo 'preflight test'
+checks: {}
 metrics:
-  - name: "test_metric"
-    command: "echo 'metric test'"
-    data_type: "string"
+  test_metric:
+    cmd: echo 'metric test'
+    data_type: string
     allowed_values: ["test"]
     default: "test"
 EOF
@@ -177,24 +177,23 @@ EOF
     [ "$status" -eq 0 ]
     [[ "$output" == *"Checks phase completed: 0/0 commands succeeded"* ]]
     
-    # No artefact files should be created
-    run ls .gitcheck/
-    [ "$status" -eq 0 ]
-    [ "$output" = "" ]
+    # No artefact files should be created - directory should not exist
+    run ls .gitcheck/ 2>/dev/null
+    [ "$status" -ne 0 ]  # Should fail because directory doesn't exist
 }
 
 @test "should handle complex commands with special characters" {
     cat > gitcheck.yaml << 'EOF'
 preflight:
-  - name: "test_preflight"
-    command: "echo 'preflight test'"
+  test_preflight:
+    cmd: echo 'preflight test'
 checks:
-  - name: "complex_command"
-    command: "echo 'test with spaces' && echo 'test with \"quotes\"' && echo 'test with $variables'"
+  complex_command:
+    cmd: echo 'test with spaces' && echo 'test with "quotes"' && echo 'test with $variables'
 metrics:
-  - name: "test_metric"
-    command: "echo 'metric test'"
-    data_type: "string"
+  test_metric:
+    cmd: echo 'metric test'
+    data_type: string
     allowed_values: ["test"]
     default: "test"
 EOF
@@ -251,17 +250,17 @@ EOF
 @test "should handle commands that produce no output" {
     cat > gitcheck.yaml << 'EOF'
 preflight:
-  - name: "test_preflight"
-    command: "echo 'preflight test'"
+  test_preflight:
+    cmd: echo 'preflight test'
 checks:
-  - name: "no_output"
-    command: "true"
-  - name: "empty_output"
-    command: "echo ''"
+  no_output:
+    cmd: "true"
+  empty_output:
+    cmd: echo ''
 metrics:
-  - name: "test_metric"
-    command: "echo 'metric test'"
-    data_type: "string"
+  test_metric:
+    cmd: echo 'metric test'
+    data_type: string
     allowed_values: ["test"]
     default: "test"
 EOF

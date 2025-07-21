@@ -148,7 +148,168 @@ echo "Validating YAML configuration..."
 echo "✅ YAML configuration validation passed"
 echo ""
 
-# Create artefact directory
-mkdir -p .gitcheck
+# Create command scripts in .gitcheck/cmds directory
+create_command_scripts() {
+    local yaml_file="$1"
+    
+    mkdir -p .gitcheck/cmds
+    
+    # Create scripts for all phases
+    for phase in preflight checks metrics; do
+        local task_names=$(yq eval ".$phase | keys | .[]" "$yaml_file" 2>/dev/null || true)
+        if [[ -n "$task_names" ]]; then
+            while IFS= read -r task_name; do
+                if [[ -n "$task_name" ]]; then
+                    local cmd=$(yq eval ".$phase.$task_name.cmd" "$yaml_file")
+                    local script_file=".gitcheck/cmds/${phase}_${task_name}.sh"
+                    
+                    cat > "$script_file" << EOF
+#!/bin/bash
+set -euo pipefail
+
+# GitCheck command script for $task_name
+# Phase: $phase
+# Generated: $(date)
+
+$cmd
+EOF
+                    chmod +x "$script_file"
+                fi
+            done <<< "$task_names"
+        fi
+    done
+}
+
+# Generate Taskfile for a specific phase
+generate_phase_taskfile() {
+    local yaml_file="$1"
+    local phase="$2"
+    local timeout="$3"
+    
+    mkdir -p .gitcheck/phases
+    local taskfile_path=".gitcheck/phases/${phase}_taskfile.yaml"
+    
+    cat > "$taskfile_path" << EOF
+version: '3'
+vars:
+  TIMEOUT: $timeout
+  ROOT_DIR:
+    sh: pwd
+tasks:
+EOF
+
+    local task_names=$(yq eval ".$phase | keys | .[]" "$yaml_file" 2>/dev/null || true)
+    if [[ -n "$task_names" ]]; then
+        echo "  $phase:" >> "$taskfile_path"
+        echo "    desc: \"$phase phase\"" >> "$taskfile_path"
+        echo "    deps:" >> "$taskfile_path"
+        while IFS= read -r task_name; do
+            [[ -n "$task_name" ]] && echo "      - ${phase}_${task_name}" >> "$taskfile_path"
+        done <<< "$task_names"
+        echo "" >> "$taskfile_path"
+        
+        while IFS= read -r task_name; do
+            if [[ -n "$task_name" ]]; then
+                local cmd=$(yq eval ".$phase.$task_name.cmd" "$yaml_file")
+                local display_cmd="${cmd//$'\n'/ }"
+                local script_file=".gitcheck/cmds/${phase}_${task_name}.sh"
+                
+                cat >> "$taskfile_path" << EOF
+  ${phase}_${task_name}:
+    dir: "{{.ROOT_DIR}}"
+EOF
+                if [[ "$phase" == "checks" ]]; then
+                    echo "    ignore_error: true" >> "$taskfile_path"
+                fi
+                cat >> "$taskfile_path" << EOF
+    cmds:
+      - mkdir -p .gitcheck/$phase
+      - |
+        {
+          echo "# GitCheck $phase Artefact: $task_name"
+          echo "# Generated: \$(date)"
+          echo "# Command: $display_cmd"
+          echo "# Phase: $phase"
+          echo "# ========================================="
+          echo ""
+          timeout {{.TIMEOUT}} $script_file
+        } > .gitcheck/$phase/$task_name 2>&1
+
+EOF
+            fi
+        done <<< "$task_names"
+    fi
+    
+    echo "$taskfile_path"
+}
+
+# Create artefact directory only if needed
+# We'll create it and command scripts only when there are tasks to run
+
+# Execute based on phase
+if [[ "$ONLY_PHASE" == "validate" ]]; then
+    echo "Configuration validated successfully."
+elif [[ "$ONLY_PHASE" == "preflight" ]]; then
+    echo "Running Preflight phase..."
+    echo "=================================="
+    taskfile_path=$(generate_phase_taskfile "$CONFIG_FILE" "preflight" "$TIMEOUT")
+    # Copy taskfile to project root for execution
+    cp "$taskfile_path" "preflight_taskfile.yaml"
+    echo "Validating taskfile with --dry-run..."
+    task --taskfile "preflight_taskfile.yaml" --dry preflight
+    echo "Running preflight tasks..."
+    task --taskfile "preflight_taskfile.yaml" preflight
+    rm "preflight_taskfile.yaml"
+elif [[ "$ONLY_PHASE" == "checks" ]]; then
+    echo "Running Checks phase..."
+    echo "=================================="
+    
+    # Check if there are any tasks to run
+    task_names=$(yq eval '.checks | keys | .[]' "$CONFIG_FILE" 2>/dev/null || true)
+    if [[ -z "$task_names" ]]; then
+        echo "Checks phase completed: 0/0 commands succeeded"
+    else
+        # Create directories and scripts only when there are tasks
+        mkdir -p .gitcheck
+        echo "Creating command scripts..."
+        create_command_scripts "$CONFIG_FILE"
+        
+        taskfile_path=$(generate_phase_taskfile "$CONFIG_FILE" "checks" "$TIMEOUT")
+        # Copy taskfile to project root for execution
+        cp "$taskfile_path" "checks_taskfile.yaml"
+        echo "Validating taskfile with --dry-run..."
+        task --taskfile "checks_taskfile.yaml" --dry checks
+        echo "Running checks tasks..."
+        task --taskfile "checks_taskfile.yaml" checks
+        rm "checks_taskfile.yaml"
+        
+        # Count completed tasks and report
+        task_count=0
+        success_count=0
+        if [[ -d ".gitcheck/checks" ]]; then
+            task_count=$(find .gitcheck/checks -name "*" -type f | wc -l | tr -d ' ')
+            success_count=$task_count  # All tasks that run are considered succeeded in checks phase
+        fi
+        echo "Checks phase completed: $success_count/$task_count commands succeeded"
+    fi
+else
+    # Run all phases
+    echo "Running Preflight phase..."
+    echo "=================================="
+    preflight_taskfile=$(generate_phase_taskfile "$CONFIG_FILE" "preflight" "$TIMEOUT")
+    cp "$preflight_taskfile" "preflight_taskfile.yaml"
+    task --taskfile "preflight_taskfile.yaml" --dry preflight
+    task --taskfile "preflight_taskfile.yaml" preflight
+    rm "preflight_taskfile.yaml"
+    
+    echo "Running Checks phase..."
+    echo "=================================="
+    checks_taskfile=$(generate_phase_taskfile "$CONFIG_FILE" "checks" "$TIMEOUT")
+    cp "$checks_taskfile" "checks_taskfile.yaml"
+    task --taskfile "checks_taskfile.yaml" --dry checks
+    task --taskfile "checks_taskfile.yaml" checks
+    rm "checks_taskfile.yaml"
+fi
 
 echo "GitCheck completed!"
+

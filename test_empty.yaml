@@ -1,0 +1,10 @@
+preflight:
+  test_preflight:
+    cmd: echo 'preflight test'
+checks: {}
+metrics:
+  test_metric:
+    cmd: echo 'metric test'
+    data_type: string
+    allowed_values: ["test"]
+    default: "test"

@@ -1,0 +1,6 @@
+version: '3'
+vars:
+  TIMEOUT: 300
+  ROOT_DIR:
+    sh: pwd
+tasks:
